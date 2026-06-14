@@ -1,0 +1,8 @@
+.env
+outputs/processed_ids.json
+outputs/send_log.csv
+outputs/fleek_retention_actions.xlsx
+__pycache__/
+*.pyc
+.DS_Store
+data/new.xlsx

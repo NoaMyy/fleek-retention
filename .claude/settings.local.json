@@ -8,7 +8,14 @@
       "Bash(python3 run.py --input data/portfolio.xlsx --dry-run)",
       "Bash(python3 run.py --input data/portfolio.xlsx --new-batch data/new.xlsx --dry-run)",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git --version)",
+      "Read(//Users/noamyers/.config/gh/**)",
+      "Bash(curl -s https://api.github.com/user -H \"Authorization: token $\\(cat ~/.config/gh/hosts.yml)",
+      "Bash(brew list *)",
+      "Read(//usr/local/bin/**)",
+      "Bash(brew install *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

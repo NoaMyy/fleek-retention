@@ -3,4 +3,5 @@ openpyxl>=3.1.0
 pandas>=2.0.0
 python-dotenv>=1.0.0
 sendgrid>=6.10.0
+streamlit>=1.35.0
 xlsxwriter>=3.1.0

@@ -1,0 +1,62 @@
+{
+  "broker_stages": {
+    "not_started": {
+      "stage_name": "Broker Only",
+      "criteria": "100% broker-placed orders",
+      "behaviour": "All orders placed via AM. No app activity. Goal: first self-serve order.",
+      "variant_a": "Buyers in your category ordering themselves get stock 2 days faster — your next restock is ready to place in the app right now.",
+      "variant_b": "New in the app: real-time stock levels and saved order templates — everything you need to order independently is one tap."
+    },
+    "stalled": {
+      "stage_name": "Tried, Reverted",
+      "criteria": "75–99% broker-placed orders",
+      "behaviour": "Placed at least one self-serve order but reverted to AM. Something blocked them.",
+      "variant_a": "You already placed a self-serve order — the hardest part is done. Second order takes half the time. Try the next one in the app.",
+      "variant_b": "Since your last self-serve order, saved lists and one-tap reorder from history are live — the friction you hit before may be gone."
+    },
+    "moving": {
+      "stage_name": "Gaining Momentum",
+      "criteria": "60–74% broker-placed orders",
+      "behaviour": "Regularly mixing self-serve with AM orders. Habit forming but not yet default.",
+      "variant_a": "You're already placing most orders yourself — cross 50% self-serve this month and unlock faster fulfilment across your whole portfolio.",
+      "variant_b": "New: reorder your full order history in one tap from the app — buyers using it cut their weekly sourcing time by 40%."
+    },
+    "nearly_graduated": {
+      "stage_name": "Building Habit",
+      "criteria": "50–59% broker-placed orders",
+      "behaviour": "Majority self-serve. One nudge away from full graduation.",
+      "variant_a": "You're majority self-serve already — one more order placed yourself and you've crossed the line. Faster fulfilment, fully in control.",
+      "variant_b": "Last feature to unlock: order templates in the app — save your regular restocks so each one takes under 60 seconds."
+    }
+  },
+  "ss_pathways": {
+    "video_call": {
+      "pathway_name": "Video Call",
+      "stage": "Browser",
+      "trigger": "ss_browser — placed orders but no offers or chat yet",
+      "variant_a": "Buyers who book a video call before their next order convert 3× more — see the stock live before committing, not after.",
+      "variant_b": "A few video call slots left this week — buyers who see stock on a call spend 30% more per session. 15 mins before anyone else commits."
+    },
+    "offer": {
+      "pathway_name": "Make an Offer",
+      "stage": "Consideration",
+      "trigger": "ss_consideration — active on offers and chat but low order volume",
+      "variant_a": "Suppliers move stock daily — the price on items you've been viewing won't hold. Make an offer in the app now and lock it in.",
+      "variant_b": "Buyers who make an offer get a supplier response within 4 hours on average — one offer in the app and the deal is halfway done."
+    },
+    "bundle": {
+      "pathway_name": "Bundle",
+      "stage": "Purchase",
+      "trigger": "ss_purchase — regular buyer, 2+ orders, high engagement",
+      "variant_a": "Buyers at your order volume who switch to bundles save 18% and cut fulfilment time by 2 days — set one up on your next restock.",
+      "variant_b": "9 in 10 buyers at your level who try bundles don't go back to single orders — faster, cheaper, one less thing to manage each week."
+    },
+    "chat": {
+      "pathway_name": "In-App Chat",
+      "stage": "Re-engagement",
+      "trigger": "ss_reengagement — high past GMV, now quiet",
+      "variant_a": "New stock has come in matching what you were buying before — your order history is live, start a chat in the app to pick it up.",
+      "variant_b": "Buyers in your category are placing early-season orders now and best stock goes fast — open the app and start a chat before shortages hit."
+    }
+  }
+}

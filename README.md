@@ -1,161 +1,124 @@
 # Fleek Retention Pipeline
 
-A repeatable, agent-ready pipeline that manages a book of Fleek wholesale accounts — segmenting them, prioritising who needs action, assigning plays, drafting outreach messages, and writing a ranked Excel output.
+A buyer retention dashboard for a wholesale marketplace. Segments a portfolio of accounts, maps each buyer to a journey stage, prioritises who needs action, drafts A/B outreach messages via Claude, and pushes to SendGrid.
 
 ---
 
-## Quick Start
+## Quick start
 
 ```bash
-# 1. Install dependencies
-pip3 install -r requirements.txt
+# 1. Clone and install
+git clone <repo-url>
+cd fleek-retention
+pip install -r requirements.txt
 
-# 2. Set environment variables
+# 2. Add credentials
 cp .env.example .env
-# Edit .env with your ANTHROPIC_API_KEY and (optionally) SENDGRID_API_KEY
+# Fill in ANTHROPIC_API_KEY and SENDGRID_API_KEY
 
-# 3. Run the pipeline
-python3 run.py --input data/portfolio.xlsx
-
-# 4. Drop in a new batch (won't duplicate already-processed accounts)
-python3 run.py --input data/portfolio.xlsx --new-batch data/new.xlsx
-
-# 5. Draft messages via Claude
-python3 run.py --input data/portfolio.xlsx --draft-messages
-
-# 6. Dry-run without any API calls
-python3 run.py --input data/portfolio.xlsx --dry-run
-
-# 7. Draft + push to SendGrid
-python3 run.py --input data/portfolio.xlsx --draft-messages --push-sendgrid
+# 3. Launch the dashboard
+streamlit run app.py
 ```
 
-Output lands in `outputs/fleek_retention_actions.xlsx`.
+Opens at `http://localhost:8501`. Upload a portfolio `.xlsx` to run the full pipeline.
 
 ---
 
-## Architecture
+## What it does
 
-```
-data/portfolio.xlsx
-        │
-        ▼
-┌─────────────────┐
-│  pipeline/clean │  Load Accounts + new_accounts tabs.
-│                 │  Deduplicate (last row wins).
-│                 │  Coerce types, fill blanks, derive fields.
-└────────┬────────┘
-         │  filter_new_accounts() — skip already-processed
-         ▼
-┌──────────────────┐
-│ pipeline/segment │  Classify into 4 segments:
-│                  │  BROKER_RELIANT, HEALTHY_AM,
-│                  │  SELF_SERVE_HEADROOM, SELF_SERVE_MATURE.
-│                  │  Flag declining HEALTHY_AM as AT_RISK.
-└────────┬─────────┘
-         ▼
-┌────────────────────┐
-│ pipeline/prioritise│  Sort within each segment.
-│                    │  Broker: GMV ↓, broker% ↓.
-│                    │  Self-serve: engagement ↓, GMV ↑.
-│                    │  AM: AT_RISK first, then GMV ↓.
-└────────┬───────────┘
-         ▼
-┌──────────────────┐
-│  pipeline/plays  │  Assign play + rung per account.
-│                  │  Broker: migration rung (4 rungs).
-│                  │  Self-serve: feature nudge.
-└────────┬─────────┘
-         │
-         ├──────────────────────────────────────┐
-         ▼                                      ▼
-┌──────────────────┐                  ┌──────────────────────┐
-│  agents/drafter  │  2 SMS variants  │ pipeline/sendgrid_   │
-│  (Claude API)    │  per account.    │ push  (optional)     │
-│  Touch 1/2/3 +   │  Reads send log  └──────────────────────┘
-│  segment angle.  │  for rung/touch.
-└────────┬─────────┘
-         ▼
-┌─────────────────────┐
-│   pipeline/output   │  Excel: Priority Actions / Full Portfolio / Plays
-└─────────────────────┘
-         │
-         ▼
-┌──────────────────────┐
-│  outputs/            │  processed_ids.json  — dedup state
-│                      │  send_log.csv        — every touch logged
-│                      │  fleek_retention_actions.xlsx
-└──────────────────────┘
-```
-
-**Where humans/agents intervene:**
-- Review the Priority Actions tab each morning.
-- Approve or edit message variants before sending.
-- SendGrid push is manual (`--push-sendgrid`) — not automatic.
+| Step | Description |
+|---|---|
+| **Clean** | Normalises ownership labels, fills gaps, deduplicates, merges into a cumulative master portfolio |
+| **Segment** | Classifies accounts into Broker Managed, Healthy AM, True Headroom, Passive Buyer, Self-Serve Other |
+| **Prioritise** | Ranks each segment by the criteria most relevant to its risk profile |
+| **Journey** | Assigns broker migration stage (Broker Only → Building Habit) or self-serve buyer journey stage (Browser → Re-engagement) |
+| **Play** | Sets a nudge feature per account (video call, offer, bundle, in-app chat) based on journey stage |
+| **Draft** | Generates two A/B SMS variants per account via Claude using engagement psychology (social proof, scarcity, loss aversion) |
+| **Push** | Sends drafted messages to SendGrid with structured subject line, category tag, and account header |
 
 ---
 
-## Segments
+## Input format
 
-| Segment | Criteria | Play |
+Upload an `.xlsx` with an **Accounts** tab containing at minimum:
+
+| Column | Description |
+|---|---|
+| `account_id` | Unique buyer identifier |
+| `ownership` | `"Account Managed"` or `"Self Serve"` |
+| `gmv_sep` … `gmv_feb` | Monthly GMV (6-month window) |
+| `orders_6m` | Total orders in 6 months |
+| `self_serve_orders` | Orders placed without AM |
+| `manual_orders` | Orders placed via AM |
+| `engagement_score` | Platform engagement index |
+| `pdp_views_6m` | Product detail page views |
+| `make_an_offer_6m` | Offers made |
+| `chat_threads` | In-app chat conversations |
+| `bundle_orders` | Bundle orders placed |
+| `video_call_requests` | Video calls booked |
+
+---
+
+## Segmentation
+
+| Segment | Criteria |
+|---|---|
+| **Broker Managed** | Account-managed + ≥50% broker reliance + low app activity |
+| **Healthy AM** | Account-managed, not broker-reliant |
+| **True Headroom** | Self-serve, engagement ≥ median, GMV < median |
+| **Passive Buyer** | Self-serve, GMV ≥ median, engagement < median |
+| **Self-Serve Other** | Self-serve, above median on both |
+
+## Broker journey stages
+
+| Stage | Broker % | Nudge direction |
 |---|---|---|
-| BROKER_RELIANT | AM-owned, broker_reliance ≥ 50%, low app/PDP activity | broker_migration |
-| HEALTHY_AM | AM-owned, not broker-reliant | am_retention (or at_risk_save if declining) |
-| SELF_SERVE_HEADROOM | Self-serve, GMV < £5k or high intent signals | self_serve_nudge |
-| SELF_SERVE_MATURE | Self-serve, high activity | self_serve_nudge |
+| Broker Only | 100% | First self-serve order |
+| Tried, Reverted | 75–99% | Restart self-serve habit |
+| Gaining Momentum | 60–74% | Cross 50% threshold |
+| Building Habit | 50–59% | Full graduation |
 
-### Broker Migration Rungs
+## Self-serve buyer journey stages
 
-| Rung | ss_ratio | Message angle |
+| Stage | Signal | Nudge |
 |---|---|---|
-| not_started | 0 | Explain self-serve; zero jargon |
-| stalled | 0–25% | Acknowledge the try; remove the blocker |
-| moving | 25–40% | Celebrate progress; name the next step |
-| nearly_graduated | 40%+ | One last nudge; offer a walkthrough |
-
-### Self-Serve Feature Nudge
-
-Best gap wins: `video_call` → `chat` → `bundle`.
+| Browser | Low orders, no offers/chat yet | Video call |
+| Consideration | Active on offers + chat, low order volume | Make an offer |
+| Purchase | Regular buyer, high engagement | Bundle |
+| Re-engagement | High past GMV, gone quiet | In-app chat |
 
 ---
 
-## State & Idempotency
-
-- `outputs/processed_ids.json` — set of account IDs already run through the pipeline. Re-running with the same input won't re-process them.
-- `outputs/send_log.csv` — one row per touch per account. Touch number advances from 1 → 2 → 3 across runs.
-- To reset a single account, remove its ID from `processed_ids.json`.
-
----
-
-## Scaling to 30,000 Accounts
-
-- All processing is vectorised via pandas — no per-row Python loops outside the Claude drafting step.
-- Drafting is the only slow step (1 API call per account). Use `--max-drafts N` to cap each run.
-- Excel output uses xlsxwriter (streaming-compatible). For very large portfolios, swap `pipeline/output.py` for a CSV writer with no code changes to the rest of the pipeline.
-- State is stored in flat files. For 30k+ accounts, replace `processed_ids.json` with a SQLite DB — the `send_log.py` interface is unchanged.
-
----
-
-## Files
+## Project structure
 
 ```
-run.py                    Entry point
+app.py                  Streamlit dashboard
+run.py                  Headless CLI entry point
 pipeline/
-  clean.py                Load, clean, deduplicate
-  segment.py              Classify accounts into segments
-  prioritise.py           Sort within segments
-  plays.py                Assign play + rung/nudge
-  send_log.py             State: processed IDs + touch log
-  output.py               Write Excel workbook
-  sendgrid_push.py        Push drafts to SendGrid
+  clean.py              Data cleaning + master portfolio merge
+  segment.py            Segmentation logic
+  prioritise.py         Ranking per segment
+  plays.py              Journey stage + nudge assignment
+  output.py             Excel export helpers
+  send_log.py           Touch number tracking
 agents/
-  drafter.py              Draft 2 SMS variants per account (Claude API)
-  message_skill.md        Message best-practice rules
-data/
-  portfolio.xlsx          Input: Accounts + new_accounts tabs
-  contacts.csv            Contact names + emails per account_id
-outputs/
-  processed_ids.json      Dedup state
-  send_log.csv            Touch log
-  fleek_retention_actions.xlsx  Output workbook
+  drafter.py            Claude API message drafter
+  message_skill.md      Messaging best-practice framework
+config/
+  variants.json         Editable A/B message templates per stage
+data/                   Portfolio files — gitignored
 ```
+
+## Message templates
+
+Templates live in `config/variants.json`. They are also editable live in the dashboard under **✏️ Message Templates** — changes take effect on the next draft run without restarting.
+
+---
+
+## Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Yes (for drafting) | Claude API key |
+| `SENDGRID_API_KEY` | Yes (for push) | SendGrid API key |
+| `SENDGRID_FROM_EMAIL` | Yes (for push) | Verified sender address |

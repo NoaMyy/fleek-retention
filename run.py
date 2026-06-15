@@ -37,8 +37,10 @@ def main():
     # --- 1. Clean ---
     print("[1/5] Cleaning portfolio data...")
     from pipeline.clean import load_and_clean
-    df = load_and_clean(args.input, new_batch_path=args.new_batch)
-    print(f"      {len(df)} accounts loaded.")
+    df, stats = load_and_clean(args.input, new_batch_path=args.new_batch)
+    print(f"      {stats['accounts_after_clean']} accounts loaded ({stats['duplicates_removed']} duplicates removed).")
+    if stats.get("total_gap_cells", 0) > 0:
+        print(f"      Data gaps filled: {stats['total_gap_cells']} cells across {stats['fields_with_gaps']} fields.")
 
     # --- 2. Filter to new accounts only (for processing) ---
     from pipeline.send_log import filter_new_accounts, mark_accounts_processed

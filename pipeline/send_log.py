@@ -13,7 +13,7 @@ SEND_LOG_PATH = "outputs/send_log.csv"
 PROCESSED_IDS_PATH = "outputs/processed_ids.json"
 
 SEND_LOG_COLUMNS = [
-    "account_id", "segment", "play", "rung", "touch_number",
+    "account_id", "segment", "play", "journey_position", "touch_number",
     "variant", "send_status", "response", "sent_at",
 ]
 
@@ -52,7 +52,7 @@ def log_touch(
     account_id: str,
     segment: str,
     play: str,
-    rung,
+    journey_position,
     touch_number: int,
     variant: str,
     send_status: str = "drafted",
@@ -64,7 +64,7 @@ def log_touch(
         "account_id": account_id,
         "segment": segment,
         "play": play,
-        "rung": rung or "",
+        "journey_position": journey_position or "",
         "touch_number": touch_number,
         "variant": variant,
         "send_status": send_status,

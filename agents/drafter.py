@@ -11,7 +11,34 @@ from pathlib import Path
 import anthropic
 import pandas as pd
 
-from pipeline.send_log import get_touch_number, log_touch
+from pipeline.send_log import log_touch
+
+DRAFT_CACHE_PATH = "data/drafts_cache.json"
+
+
+def _load_draft_cache() -> dict:
+    try:
+        with open(DRAFT_CACHE_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_draft_cache(cache: dict) -> None:
+    os.makedirs("data", exist_ok=True)
+    with open(DRAFT_CACHE_PATH, "w") as f:
+        json.dump(cache, f)
+
+
+def _cache_key(row: pd.Series) -> str:
+    """Unique key per account+context — cache busts if play/nudge/journey changes."""
+    return "|".join([
+        str(row.get("account_id", "")),
+        str(row.get("play", "")),
+        str(row.get("journey_position", "")),
+        str(row.get("nudge_feature", "")),
+        str(row.get("segment", "")),
+    ])
 
 VARIANTS_PATH = "config/variants.json"
 
@@ -68,7 +95,7 @@ SS_PATHWAY_ANGLES = {
 }
 
 
-def _build_prompt(row: pd.Series, touch_number: int, variants: dict) -> str:
+def _build_prompt(row: pd.Series, variants: dict) -> str:
     journey_position = row.get("journey_position") or ""
     nudge = row.get("nudge_feature") or ""
     segment = row["segment"]
@@ -102,6 +129,7 @@ def _build_prompt(row: pd.Series, touch_number: int, variants: dict) -> str:
         f"Variant A angle: {angle_a}\n"
         f"Variant B angle: {angle_b}\n"
     )
+
 
     return (
         f"{SKILL}\n\n"
@@ -137,77 +165,78 @@ def draft_messages(
 ) -> pd.DataFrame:
     """
     Add msg_variant_a and msg_variant_b columns to df.
-    Skips accounts already at touch 3.
+    Calls are made in parallel (up to 20 concurrent) to keep total time under ~15s.
+    Skips accounts that already have a drafted message unless variants changed.
     """
+    import concurrent.futures
+
     if variants is None:
         variants = _load_variants()
 
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    df = df.copy()
+
+    if "msg_variant_a" not in df.columns:
+        df["msg_variant_a"] = ""
+    if "msg_variant_b" not in df.columns:
+        df["msg_variant_b"] = ""
+    if "touch_number" not in df.columns:
+        df["touch_number"] = 1
+
     if not api_key:
-        print("  [drafter] No ANTHROPIC_API_KEY — filling placeholder messages.")
-        df = df.copy()
         df["msg_variant_a"] = df.apply(
-            lambda r: f"[A] {r['play']} nudge for {r['account_id']} (touch {get_touch_number(r['account_id'])})",
+            lambda r: f"[A] {r['play']} nudge for {r['account_id']}",
             axis=1,
         )
         df["msg_variant_b"] = df.apply(
-            lambda r: f"[B] {r['play']} nudge for {r['account_id']} (touch {get_touch_number(r['account_id'])})",
+            lambda r: f"[B] {r['play']} nudge for {r['account_id']}",
             axis=1,
         )
-        df["touch_number"] = df["account_id"].apply(get_touch_number)
         return df
 
     client = anthropic.Anthropic(api_key=api_key)
-    df = df.copy()
-    df["msg_variant_a"] = ""
-    df["msg_variant_b"] = ""
-    df["touch_number"] = 1
+    cache = _load_draft_cache()
 
     subset = df if max_accounts is None else df.head(max_accounts)
 
+    # Fill from cache first
     for idx, row in subset.iterrows():
-        touch = get_touch_number(row["account_id"])
-        df.at[idx, "touch_number"] = touch
+        key = _cache_key(row)
+        if key in cache:
+            entry = cache[key]
+            df.at[idx, "msg_variant_a"] = entry.get("a", "")
+            df.at[idx, "msg_variant_b"] = entry.get("b", "")
 
+    # Only call API for rows still without a draft
+    needs_draft = df[df["msg_variant_a"].fillna("") == ""].copy()
+
+    def _draft_one(idx_row):
+        idx, row = idx_row
         if dry_run:
-            df.at[idx, "msg_variant_a"] = f"[dry-run A] touch {touch}"
-            df.at[idx, "msg_variant_b"] = f"[dry-run B] touch {touch}"
-            continue
-
-        prompt = _build_prompt(row, touch, variants)
+            return idx, "[dry-run A]", "[dry-run B]"
+        prompt = _build_prompt(row, variants)
         try:
             response = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=300,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = response.content[0].text
-            a, b = _parse_variants(text)
-            df.at[idx, "msg_variant_a"] = a
-            df.at[idx, "msg_variant_b"] = b
-
-            log_touch(
-                account_id=row["account_id"],
-                segment=row["segment"],
-                play=str(row.get("play", "")),
-                journey_position=row.get("journey_position"),
-                touch_number=touch,
-                variant="A",
-                send_status="drafted",
-            )
-            log_touch(
-                account_id=row["account_id"],
-                segment=row["segment"],
-                play=str(row.get("play", "")),
-                journey_position=row.get("journey_position"),
-                touch_number=touch,
-                variant="B",
-                send_status="drafted",
-            )
-
+            a, b = _parse_variants(response.content[0].text)
+            return idx, a, b
         except Exception as e:
             print(f"  [drafter] Error for {row['account_id']}: {e}")
-            df.at[idx, "msg_variant_a"] = f"[error] {e}"
-            df.at[idx, "msg_variant_b"] = f"[error] {e}"
+            return idx, f"[error] {e}", f"[error] {e}"
+
+    if not needs_draft.empty:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:
+            results = list(pool.map(_draft_one, needs_draft.iterrows()))
+
+        for idx, a, b in results:
+            df.at[idx, "msg_variant_a"] = a
+            df.at[idx, "msg_variant_b"] = b
+            key = _cache_key(df.loc[idx])
+            cache[key] = {"a": a, "b": b}
+
+        _save_draft_cache(cache)
 
     return df

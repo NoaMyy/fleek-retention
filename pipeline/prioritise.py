@@ -16,13 +16,6 @@ import pandas as pd
 
 _MONTHLY_GMV_COLS = ["gmv_sep", "gmv_oct", "gmv_nov", "gmv_dec", "gmv_jan", "gmv_feb"]
 
-_JOURNEY_STALL = {
-    "not_started":      10,
-    "stalled":           7,
-    "moving":            3,
-    "nearly_graduated":  0,
-}
-
 # Display names for archetypes (ordered least → most pushable)
 ARCHETYPE_DISPLAY = {
     "ENTRENCHED_BROKER": "Entrenched Broker Buyer",
@@ -73,15 +66,11 @@ def compute_broker_burden(broker_df: pd.DataFrame) -> pd.DataFrame:
     # 3. GMV Consistency — row-level calculation
     df["_dim_consistency"] = df.apply(_gmv_consistency_score, axis=1)
 
-    # 4. Migration Stall — fixed map from journey_position
-    df["_dim_stall"] = df["journey_position"].map(_JOURNEY_STALL).fillna(5)
-
-    # Weighted sum → 0–100
+    # Weighted sum → 0–100  (reliance 40% · workload 40% · consistency 20%)
     df["burden_score"] = (
-        df["_dim_reliance"]    * 0.30 +
-        df["_dim_workload"]    * 0.30 +
-        df["_dim_consistency"] * 0.20 +
-        df["_dim_stall"]       * 0.20
+        df["_dim_reliance"]    * 0.40 +
+        df["_dim_workload"]    * 0.40 +
+        df["_dim_consistency"] * 0.20
     ) * 10  # scale: max raw = 10 → ×10 = 100
 
     df["burden_score"] = df["burden_score"].round(1)
@@ -91,13 +80,11 @@ def compute_broker_burden(broker_df: pd.DataFrame) -> pd.DataFrame:
         "_dim_reliance":    "reliance depth",
         "_dim_workload":    "AM workload",
         "_dim_consistency": "GMV consistency",
-        "_dim_stall":       "migration stall",
     }
     _dim_weights = {
-        "_dim_reliance":    0.30,
-        "_dim_workload":    0.30,
+        "_dim_reliance":    0.40,
+        "_dim_workload":    0.40,
         "_dim_consistency": 0.20,
-        "_dim_stall":       0.20,
     }
 
     def _top_drivers(row):

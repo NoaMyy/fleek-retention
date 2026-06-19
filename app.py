@@ -340,14 +340,22 @@ def _run_pipeline(uploaded_bytes: bytes, filename: str) -> tuple:
         else:
             log.append("⚠️ `data/contacts.csv` not found — email column will be empty")
 
-        # 6. Draft messages
-        df = draft_messages(df)
-        drafted = int((df.get("msg_variant_a", pd.Series([])) != "").sum())
-        log.append(f"✅ Drafted messages for **{drafted}** accounts")
+        # Load any previously cached drafts without calling the API
+        from agents.drafter import _load_draft_cache, _cache_key
+        cache = _load_draft_cache()
+        df["msg_variant_a"] = ""
+        df["msg_variant_b"] = ""
+        for idx, row in df.iterrows():
+            entry = cache.get(_cache_key(row))
+            if entry:
+                df.at[idx, "msg_variant_a"] = entry.get("a", "")
+                df.at[idx, "msg_variant_b"] = entry.get("b", "")
+        cached_count = int((df["msg_variant_a"] != "").sum())
+        log.append(
+            f"✅ Loaded **{cached_count}** cached drafts · "
+            f"**{len(df) - cached_count}** need drafting — click **Draft messages** below"
+        )
 
-        if "touch_number" not in df.columns:
-            df["touch_number"] = 1
-        df["tier"] = "T" + df["touch_number"].astype(int).astype(str)
 
     finally:
         os.unlink(tmp_path)
@@ -1017,21 +1025,16 @@ if st.session_state.df is not None:
         "(self-serve), and touch number. Approve and push to SendGrid when ready."
     )
 
-    f1, f2, f3 = st.columns(3)
+    f1, f2 = st.columns([2, 1])
     with f1:
         seg_filter = st.multiselect(
             "Category", options=sorted(df["segment"].unique()),
             default=sorted(df["segment"].unique()), key="draft_seg_filter",
         )
     with f2:
-        tier_options = sorted(df["tier"].unique()) if "tier" in df.columns else ["T1", "T2", "T3"]
-        tier_filter = st.multiselect("Touch", options=tier_options, default=tier_options, key="draft_tier_filter")
-    with f3:
-        has_drafts_only = st.checkbox("Drafted only", value=True, key="draft_filter")
+        has_drafts_only = st.checkbox("Drafted only", value=False, key="draft_filter")
 
     mask = df["segment"].isin(seg_filter)
-    if "tier" in df.columns:
-        mask = mask & df["tier"].isin(tier_filter)
     if has_drafts_only and "msg_variant_a" in df.columns:
         mask = mask & (df["msg_variant_a"].fillna("") != "")
     view_df = df[mask].copy()
@@ -1043,55 +1046,87 @@ if st.session_state.df is not None:
 
     display_col_map = {
         "account_id": "Account ID", "segment": "Category",
-        "tier": "Touch", "Journey Stage": "Journey Stage",
+        "Journey Stage": "Journey Stage",
         "Engagement Method": "Engagement Method",
         "msg_variant_a": "Variant A", "msg_variant_b": "Variant B",
     }
     display_df = view_df[
         [c for c in display_col_map.keys() if c in view_df.columns]
     ].copy().rename(columns=display_col_map)
-    display_df.insert(0, "Push?", False)
+    display_df.insert(0, "Draft?", False)
+    display_df.insert(1, "Push?", False)
 
     edited = st.data_editor(
         display_df,
         use_container_width=True,
         hide_index=True,
         column_config={
+            "Draft?":            st.column_config.CheckboxColumn("Draft?", default=False),
             "Push?":             st.column_config.CheckboxColumn("Push?", default=False),
             "Variant A":         st.column_config.TextColumn("Variant A", width="large"),
             "Variant B":         st.column_config.TextColumn("Variant B", width="large"),
             "Journey Stage":     st.column_config.TextColumn("Journey Stage", width="medium"),
             "Engagement Method": st.column_config.TextColumn("Engagement Method", width="medium"),
         },
-        disabled=[c for c in display_df.columns if c != "Push?"],
+        disabled=[c for c in display_df.columns if c not in ("Draft?", "Push?")],
         key="drafts_editor",
     )
 
-    btn1, btn2, btn3, _ = st.columns([1, 1, 1, 4])
+    btn1, btn2, btn3, btn4, _ = st.columns([1.2, 1.2, 1.2, 1, 2])
     with btn1:
-        push_all_t1 = st.button("🚀 Push all T1", type="primary")
+        push_all_t1 = st.button("📥 Save all to SendGrid drafts", type="primary")
     with btn2:
-        push_selected = st.button("📤 Push selected")
+        push_selected = st.button("📥 Save selected to drafts")
     with btn3:
+        draft_selected = st.button("✉️ Draft selected")
+    with btn4:
         variant_choice = st.radio("Variant", ["A", "B"], horizontal=True, label_visibility="collapsed")
+
+    # Draft selected accounts
+    if draft_selected:
+        selected_draft_ids = edited[edited["Draft?"] == True]["Account ID"].tolist()
+        if not selected_draft_ids:
+            st.warning("Tick the Draft? box next to the accounts you want to draft first.")
+        else:
+            from agents.drafter import draft_messages as _dm
+            # Extract only the selected rows, clear their existing drafts, draft just those
+            selected_df = df[df["account_id"].isin(selected_draft_ids)].copy()
+            selected_df["msg_variant_a"] = ""
+            selected_df["msg_variant_b"] = ""
+            with st.spinner(f"Drafting {len(selected_df)} accounts…"):
+                drafted_df = _dm(selected_df, variants=load_variants())
+            # Merge results back into the full df
+            full_df = st.session_state.df.copy()
+            for _, row in drafted_df.iterrows():
+                idx = full_df[full_df["account_id"] == row["account_id"]].index
+                if len(idx):
+                    full_df.at[idx[0], "msg_variant_a"] = row["msg_variant_a"]
+                    full_df.at[idx[0], "msg_variant_b"] = row["msg_variant_b"]
+            st.session_state.df = full_df
+            st.success(f"Drafted {len(selected_df)} accounts.")
+            st.rerun()
 
     if push_all_t1 or push_selected:
         if push_all_t1:
-            target_ids = view_df[view_df["tier"] == "T1"]["account_id"].tolist()
-            label = "T1"
+            target_ids = view_df["account_id"].tolist()
+            label = "all"
         else:
             selected_ids = edited[edited["Push?"] == True]["Account ID"].tolist()
             target_ids = selected_ids
             label = "selected"
 
         if not target_ids:
-            st.warning(f"No {label} accounts to push.")
+            st.warning(f"No {label} accounts selected — tick the Push? box first.")
         else:
-            push_rows = df[df["account_id"].isin(target_ids)]
-            with st.spinner(f"Pushing {len(push_rows)} {label} drafts to SendGrid…"):
-                result = _do_push(push_rows, variant=variant_choice)
-            st.session_state.sg_status = {**result, "pushed_count": len(push_rows), "label": label}
-            st.rerun()
+            # Use the full session df so all columns (msg_variant_a etc.) are present
+            push_rows = st.session_state.df[st.session_state.df["account_id"].isin(target_ids)]
+            if push_rows["msg_variant_a"].fillna("").eq("").all():
+                st.warning("No drafted messages found for the selected accounts — draft them first.")
+            else:
+                with st.spinner(f"Creating {len(push_rows)} SendGrid draft{'s' if len(push_rows) > 1 else ''}…"):
+                    result = _do_push(push_rows, variant=variant_choice)
+                st.session_state.sg_status = {**result, "pushed_count": len(push_rows), "label": label}
+                st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────
     # SECTION 5: MESSAGE TEMPLATES
@@ -1185,14 +1220,16 @@ if st.session_state.df is not None:
             save_variants(_variants)
             st.success("Saved.")
     with _rd_col:
-        if st.button("🔄 Redraft messages"):
-            with st.spinner("Redrafting with updated variants…"):
+        _undrafted = int((st.session_state.df["msg_variant_a"].fillna("") == "").sum())
+        _btn_label = f"✉️ Draft messages ({_undrafted} pending)" if _undrafted else "🔄 Redraft all"
+        if st.button(_btn_label):
+            with st.spinner("Drafting messages…"):
                 from agents.drafter import draft_messages
                 st.session_state.df = draft_messages(
                     st.session_state.df,
                     variants=load_variants(),
                 )
-            st.success("Messages redrafted.")
+            st.success("Done.")
             st.rerun()
 
     # ─────────────────────────────────────────────────────────────────────────

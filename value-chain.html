@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sainsbury's Value Chain</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --t1: #f59e0b;
+    --t2: #10b981;
+    --t3: #3b82f6;
+    --t4: #8b5cf6;
+    --t5: #06b6d4;
+    --t6: #22c55e;
+    --t7: #6366f1;
+    --t8: #64748b;
+    --plan: #f97316;
+    --buy: #3b82f6;
+    --move: #8b5cf6;
+    --sell: #10b981;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --muted: #94a3b8;
+    --header-h: 64px;
+    --sidebar-w: 0px;
+  }
+
+  html, body { height: 100%; overflow: hidden; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+
+  /* ── TOP BAR ── */
+  .topbar {
+    height: var(--header-h);
+    background: white;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 16px;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    box-shadow: 0 1px 4px rgba(0,0,0,.04);
+  }
+  .topbar-title { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+  .topbar-divider { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+
+  /* territory filter chips */
+  .filters { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; align-items: center; }
+  .filters::-webkit-scrollbar { display: none; }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 11px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    cursor: pointer; border: 1.5px solid transparent;
+    transition: all .15s; white-space: nowrap; user-select: none;
+    background: var(--bg);
+  }
+  .chip .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .chip.active { color: white; border-color: transparent; }
+  .chip:not(.active) { color: var(--text); border-color: var(--border); }
+  .chip:not(.active):hover { border-color: var(--chip-color); color: var(--chip-color); background: white; }
+
+  .chip[data-t="all"] { --chip-color: var(--text); }
+  .chip[data-t="all"].active { background: var(--text); }
+  .chip[data-t="T1"] { --chip-color: var(--t1); }
+  .chip[data-t="T1"].active { background: var(--t1); }
+  .chip[data-t="T2"] { --chip-color: var(--t2); }
+  .chip[data-t="T2"].active { background: var(--t2); }
+  .chip[data-t="T3"] { --chip-color: var(--t3); }
+  .chip[data-t="T3"].active { background: var(--t3); }
+  .chip[data-t="T4"] { --chip-color: var(--t4); }
+  .chip[data-t="T4"].active { background: var(--t4); }
+  .chip[data-t="T5"] { --chip-color: var(--t5); }
+  .chip[data-t="T5"].active { background: var(--t5); }
+  .chip[data-t="T6"] { --chip-color: var(--t6); }
+  .chip[data-t="T6"].active { background: var(--t6); }
+  .chip[data-t="T7"] { --chip-color: var(--t7); }
+  .chip[data-t="T7"].active { background: var(--t7); }
+  .chip[data-t="T8"] { --chip-color: var(--t8); }
+  .chip[data-t="T8"].active { background: var(--t8); }
+
+  /* ── SCROLL CANVAS ── */
+  .canvas {
+    margin-top: var(--header-h);
+    height: calc(100vh - var(--header-h));
+    overflow-x: auto;
+    overflow-y: auto;
+    padding: 24px 24px 40px;
+    display: flex;
+    gap: 0;
+    align-items: flex-start;
+  }
+  .canvas::-webkit-scrollbar { height: 6px; width: 6px; }
+  .canvas::-webkit-scrollbar-track { background: transparent; }
+  .canvas::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── PHASE COLUMNS ── */
+  .phase-col {
+    display: flex;
+    flex-direction: column;
+    min-width: 210px;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .phase-col + .phase-col { margin-left: 2px; }
+  .phase-col + .phase-col::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 1px;
+    background: var(--border);
+  }
+
+  .phase-header {
+    padding: 10px 16px 12px;
+    font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+    border-bottom: 3px solid;
+    margin-bottom: 12px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+  .phase-col[data-phase="Plan"] .phase-header { color: var(--plan); border-color: var(--plan); }
+  .phase-col[data-phase="Buy"]  .phase-header { color: var(--buy);  border-color: var(--buy);  }
+  .phase-col[data-phase="Move"] .phase-header { color: var(--move); border-color: var(--move); }
+  .phase-col[data-phase="Sell"] .phase-header { color: var(--sell); border-color: var(--sell); }
+
+  .phase-count { float: right; opacity: .5; font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; margin-top: 1px; }
+
+  /* ── ACTIVITY CARDS ── */
+  .activity-cards { display: flex; flex-direction: column; gap: 8px; padding: 0 8px 8px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 12px 10px;
+    cursor: pointer;
+    transition: opacity .2s, box-shadow .15s, transform .1s;
+    position: relative;
+  }
+  .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.08); transform: translateY(-1px); }
+  .card.dimmed { opacity: .25; pointer-events: none; }
+  .card.focused { box-shadow: 0 0 0 2px var(--focus-color, #3b82f6), 0 4px 16px rgba(0,0,0,.1); }
+
+  /* heat bar on left */
+  .card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 8px; bottom: 8px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+    background: var(--heat-color, transparent);
+    opacity: var(--heat-opacity, 0);
+  }
+
+  .card-num { font-size: 10px; color: var(--muted); font-weight: 500; margin-bottom: 4px; }
+  .card-name { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1.4; margin-bottom: 8px; }
+  .card-dots { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+  .tdot {
+    width: 20px; height: 20px; border-radius: 5px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 700; color: white;
+    cursor: pointer; position: relative; flex-shrink: 0;
+    transition: transform .1s, box-shadow .1s;
+  }
+  .tdot:hover { transform: scale(1.2); box-shadow: 0 2px 6px rgba(0,0,0,.15); z-index: 5; }
+  .tdot[data-t="T1"] { background: var(--t1); }
+  .tdot[data-t="T2"] { background: var(--t2); }
+  .tdot[data-t="T3"] { background: var(--t3); }
+  .tdot[data-t="T4"] { background: var(--t4); }
+  .tdot[data-t="T5"] { background: var(--t5); }
+  .tdot[data-t="T6"] { background: var(--t6); }
+  .tdot[data-t="T7"] { background: var(--t7); }
+  .tdot[data-t="T8"] { background: var(--t8); }
+
+  /* heat count badge */
+  .heat-badge {
+    position: absolute; top: 8px; right: 8px;
+    font-size: 9px; font-weight: 700; color: var(--muted);
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 5px; line-height: 1.4;
+  }
+
+  /* ── TOOLTIP ── */
+  .tooltip {
+    position: fixed;
+    z-index: 9999;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.12);
+    padding: 14px 16px;
+    max-width: 300px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .12s;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .tooltip.visible { opacity: 1; }
+  .tooltip-title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  .tooltip-type { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; margin-bottom: 8px; }
+  .tooltip-body { color: #475569; }
+
+  /* ── DETAIL PANEL ── */
+  .panel {
+    position: fixed;
+    right: 0; top: var(--header-h); bottom: 0;
+    width: 380px;
+    background: white;
+    border-left: 1px solid var(--border);
+    box-shadow: -4px 0 24px rgba(0,0,0,.07);
+    transform: translateX(100%);
+    transition: transform .25s cubic-bezier(.4,0,.2,1);
+    z-index: 50;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel.open { transform: translateX(0); }
+
+  .panel-close {
+    position: absolute; top: 14px; right: 14px;
+    width: 28px; height: 28px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 16px; color: var(--muted); line-height: 1;
+  }
+  .panel-close:hover { background: white; color: var(--text); }
+
+  .panel-header {
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel-phase { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 4px; }
+  .panel-num { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .panel-name { font-size: 16px; font-weight: 700; line-height: 1.3; }
+  .panel-desc { margin-top: 8px; font-size: 12px; color: #475569; line-height: 1.6; }
+
+  .panel-body { padding: 16px 20px; flex: 1; }
+  .panel-section-title { font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+
+  .territory-item {
+    display: flex; gap: 10px; margin-bottom: 14px; align-items: flex-start;
+  }
+  .territory-pill {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 20px; border-radius: 4px; font-size: 9px; font-weight: 700;
+    color: white; flex-shrink: 0; margin-top: 1px;
+  }
+  .territory-item-name { font-size: 12px; font-weight: 600; margin-bottom: 3px; }
+  .territory-item-desc { font-size: 11px; color: #475569; line-height: 1.5; }
+
+  /* ── TERRITORY FOCUS MODE ── */
+  .focus-banner {
+    display: none;
+    position: fixed;
+    bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--text);
+    color: white;
+    border-radius: 24px;
+    padding: 10px 20px;
+    font-size: 12px; font-weight: 500;
+    z-index: 200;
+    align-items: center; gap: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.2);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .focus-banner.show { display: flex; }
+  .focus-banner span { opacity: .6; }
+
+  /* scrollbar */
+  .panel::-webkit-scrollbar { width: 4px; }
+  .panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<header class="topbar">
+  <div class="topbar-title">Value Chain</div>
+  <div class="topbar-divider"></div>
+  <div class="filters" id="filters">
+    <div class="chip active" data-t="all"><span>All</span></div>
+    <div class="chip" data-t="T1"><span class="dot" style="background:var(--t1)"></span>T1 · Adaptive Customer</div>
+    <div class="chip" data-t="T2"><span class="dot" style="background:var(--t2)"></span>T2 · Living Store</div>
+    <div class="chip" data-t="T3"><span class="dot" style="background:var(--t3)"></span>T3 · Autonomous Loop</div>
+    <div class="chip" data-t="T4"><span class="dot" style="background:var(--t4)"></span>T4 · On-Demand Conv.</div>
+    <div class="chip" data-t="T5"><span class="dot" style="background:var(--t5)"></span>T5 · Platform</div>
+    <div class="chip" data-t="T6"><span class="dot" style="background:var(--t6)"></span>T6 · Better Food</div>
+    <div class="chip" data-t="T7"><span class="dot" style="background:var(--t7)"></span>T7 · AI Enterprise</div>
+    <div class="chip" data-t="T8"><span class="dot" style="background:var(--t8)"></span>T8 · Data & Trust</div>
+  </div>
+</header>
+
+<!-- TOOLTIP -->
+<div class="tooltip" id="tooltip">
+  <div class="tooltip-title" id="tt-title"></div>
+  <div class="tooltip-type" id="tt-type"></div>
+  <div class="tooltip-body" id="tt-body"></div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div class="panel" id="panel">
+  <button class="panel-close" id="panel-close">×</button>
+  <div class="panel-header">
+    <div class="panel-phase" id="p-phase"></div>
+    <div class="panel-num" id="p-num"></div>
+    <div class="panel-name" id="p-name"></div>
+    <div class="panel-desc" id="p-desc"></div>
+  </div>
+  <div class="panel-body">
+    <div class="panel-section-title">Territory Connections</div>
+    <div id="p-territories"></div>
+  </div>
+</div>
+
+<!-- MAIN CANVAS -->
+<main class="canvas" id="canvas"></main>
+
+<!-- FOCUS BANNER -->
+<div class="focus-banner" id="focus-banner">
+  <span>Viewing</span> <strong id="focus-label"></strong> · <span>click to clear</span>
+</div>
+
+<script>
+// ── DATA ──────────────────────────────────────────────────────────────────────
+
+const PHASES = ['Plan','Buy','Move','Sell'];
+
+const PHASE_COLORS = { Plan:'#f97316', Buy:'#3b82f6', Move:'#8b5cf6', Sell:'#10b981' };
+
+const T_COLORS = {
+  T1:'#f59e0b', T2:'#10b981', T3:'#3b82f6', T4:'#8b5cf6',
+  T5:'#06b6d4', T6:'#22c55e', T7:'#6366f1', T8:'#64748b'
+};
+
+const TERRITORIES = {
+  T1: { name:'The Adaptive Customer Relationship', type:'Strategic', short:'Adaptive Customer Relationship',
+    desc:'Sainsbury\'s relationship with each customer becomes continuous, individual-level and AI-mediated. The offer is personalised, the service is adaptive, and the operating environment responds to customer signals at household and aggregate level.' },
+  T2: { name:'The Living Store', type:'Strategic', short:'Living Store',
+    desc:'The physical store transforms from a static merchandise environment into an intelligent, sensing node that executes from live data, delivers frictionless operations, and earns its footprint through experience and service.' },
+  T3: { name:'The Autonomous Operating Loop', type:'Backbone', short:'Autonomous Operating Loop',
+    desc:'Commercial decisions, supply chain, DC operations and store execution connect into a single DDA (Detect, Decide, Act) loop running with minimal human intervention. Humans set strategy and manage exceptions; machines run the operation.' },
+  T4: { name:'The On-Demand Convenience', type:'Strategic', short:'On-Demand Convenience',
+    desc:'A multi-speed, elastic fulfilment network that meets customers wherever they need to be served — rapid on-demand, scheduled delivery, click and collect, subscription replenishment and autonomous last-mile.' },
+  T5: { name:'The Platform Business', type:'Strategic', short:'Platform Business',
+    desc:'Sainsbury\'s builds a commercial platform on top of its grocery operation — monetising first-party data, customer relationships, physical estate and supplier access to create revenue streams beyond grocery margin.' },
+  T6: { name:'The Better Food Enterprise', type:'Strategic', short:'Better Food Enterprise',
+    desc:'Quality, freshness, health and waste reduction become structural operating principles woven through every stage of the value chain — from supplier selection through to shelf freshness management.' },
+  T7: { name:'The AI-Empowered Enterprise', type:'Backbone', short:'AI-Empowered Enterprise',
+    desc:'Sainsbury\'s reimagines itself as an AI-native organisation — redesigning roles, decision-making architecture, processes and ways of working from first principles around human-AI collaboration.' },
+  T8: { name:'Data Foundations, Process and Trust', type:'Backbone', short:'Data & Trust',
+    desc:'The data, process and governance infrastructure that determines the ceiling on every other territory. Unified data platforms, process re-engineering, AI governance frameworks, consent management and compliance built as structural capabilities.' }
+};
+
+const ACTIVITIES = [
+  // Plan
+  { phase:'Plan', num:'1.1', name:'Customer proposition and marketing planning',
+    desc:'Defining and communicating Sainsbury\'s value proposition, brand positioning, marketing investment and promotional calendar across all channels.',
+    territories: {
+      T1:'Proposition is designed at customer-of-one level — marketing, pricing and recommendations all adapt to the individual, powered by hyper-local assortment intelligence and real-time Nectar signals.',
+      T5:'Sainsbury\'s ability to offer media reach, first-party data and commerce infrastructure makes it a platform partner to suppliers, not just a retailer.',
+      T6:'Health, quality and sustainability become structural proposition pillars — the territory shifts Sainsbury\'s from "food retailer with health options" to "enterprise built around better food", backed by evidence.',
+      T7:'AI co-pilots surface competitive signals, customer trends and brand performance data at speed and scale human teams cannot match alone — augmenting the proposition design function.',
+      T8:'Data foundations underpin every proposition decision — customer insight accuracy, brand performance data integrity and competitive signal quality all flow from T8 infrastructure.'
+    }},
+  { phase:'Plan', num:'1.2', name:'Range and assortment planning',
+    desc:'Determining which SKUs to stock, in what volumes and in which stores or channels, balancing customer relevance, supplier terms and waste targets.',
+    territories: {
+      T1:'Hyper-local assortment intelligence shapes ranging by catchment; agent-readable range structure enables machine-mediated discovery alongside human browse.',
+      T2:'Hyper-local assortment intelligence is a core Living Store capability — the store ranges for its community, with local suppliers creating locally distinctive assortment.',
+      T3:'AI Merchandising closes the loop from customer demand signals to range architecture — continuous AI-driven review replaces periodic manual ranging cycles.',
+      T6:'Range architecture is the primary commercial expression — every tier evaluated against health, freshness and sustainability as structural requirements.',
+      T7:'AI-assisted range planning allows category managers to evaluate NPD and exit decisions against broader data sets, building the foundation for autonomous range architecture.',
+      T8:'The quality and governance of data flowing into ranging decisions directly determines the quality of range decisions. T8 builds the data quality standards that make AI-driven range intelligence trustworthy and auditable.'
+    }},
+  { phase:'Plan', num:'1.3', name:'Promo and trading planning',
+    desc:'Designing and scheduling promotional mechanics — personalised offers, supplier-funded deals, multi-buys and seasonal trading events.',
+    territories: {
+      T1:'Promotional mechanics shift to individually personalised offers with Nectar data determining relevance, depth and timing per household.',
+      T3:'AI commercial orchestration generates and deploys promotional mechanics from demand signals, removing manual planning cycles.',
+      T5:'Retail media is embedded in the promotional trading conversation — supplier-funded personalised media and sponsored placement are standard JBP mechanics.',
+      T6:'Health-led promotional mechanics (better basket incentives, fresh promotions) create a promotional category that drives health outcomes alongside commercial volume.',
+      T7:'AI co-pilots in promotional planning accelerate design and performance measurement — the foundational capability that T3\'s fully automated promotional mechanics build on.',
+      T8:'Promotional data accuracy — redemption tracking, personalisation signal quality, supplier contribution data — all require T8 data governance foundations.'
+    }},
+  { phase:'Plan', num:'1.4', name:'Network and capacity planning',
+    desc:'Determining the right number, type and location of stores, DCs, dark stores and fulfilment nodes to serve current and future demand.',
+    territories: {
+      T2:'Store format strategy — format mix, hub vs spoke, experience investment — is the direct physical expression of the Living Store territory.',
+      T3:'Network investment decisions are driven by the operating loop\'s data flow and physical operation requirements.',
+      T4:'Network and capacity planning for on-demand is driven by demand mode geography and customer convenience requirements — fundamentally different from traditional scheduled distribution.',
+      T7:'AI tools enable scenario modelling at a speed and scale that manual network analysis cannot support — automation investment cases and resilience assessments benefit directly.',
+      T8:'Network planning data — footfall, demand patterns, logistics cost data — requires T8 data quality standards to be reliable input into strategic investment decisions.'
+    }},
+  { phase:'Plan', num:'1.5', name:'Workforce planning',
+    desc:'Forecasting headcount requirements, role mix, skill profiles and training investment needed across store, DC and head office functions.',
+    territories: {
+      T2:'The Living Store requires a qualitatively different workforce model — colleagues shift from replenishment to advisory, experience and community roles.',
+      T7:'Workforce planning is the primary home of this territory — role redesign, capability building, training infrastructure and change management all live here.',
+      T8:'Workforce planning in an AI-augmented enterprise requires accurate headcount, skills and productivity data as its foundation.'
+    }},
+  { phase:'Plan', num:'1.6', name:'Commercial and financial planning',
+    desc:'Setting budgets, margin targets, P&L forecasts, capital allocation priorities and long-range financial plans across the business.',
+    territories: {
+      T3:'AI-driven commercial decisions structurally lower the cost base by replacing headcount-intensive planning functions with automated decision systems.',
+      T5:'Retail media revenue is a distinct and growing P&L line with different capital requirements, margin dynamics and growth trajectory.',
+      T7:'Agentic Back Office and AI-augmented financial planning tools transform scenario modelling, budget management and capital allocation decision-making.',
+      T8:'All commercial and financial planning runs on data quality and process discipline — forecast accuracy, margin modelling, and reporting integrity require T8 foundations.'
+    }},
+  { phase:'Plan', num:'1.7', name:'Pricing and markdown management',
+    desc:'Setting everyday prices, personalised prices, promotional depths and markdown timing rules to optimise margin, volume and competitive position.',
+    territories: {
+      T1:'Dynamic personalised pricing — Nectar-linked pricing, individually targeted offers — is a core mechanism of the adaptive customer relationship.',
+      T3:'Automated markdown management and dynamic pricing rules execute within the operating loop, removing manual intervention from routine pricing decisions.',
+      T5:'Pricing data and promotional performance are valuable platform assets — supplier access to this data is a platform commercial lever.',
+      T8:'Pricing data integrity — accurate cost data, competitor price feeds, promotional redemption data — is foundational to pricing intelligence.'
+    }},
+
+  // Buy
+  { phase:'Buy', num:'2.1', name:'Supplier engagement and onboarding',
+    desc:'Identifying, qualifying and onboarding new suppliers including sustainability, ethical sourcing, capability and risk assessments.',
+    territories: {
+      T6:'Supplier selection rebuilt around quality, health and sustainability as primary criteria — provenance, welfare and food standards are baseline qualification requirements.',
+      T7:'AI-assisted supplier management tools surface performance signals and compliance risks proactively — colleagues work with AI to manage a broader supplier base.',
+      T8:'Supplier data quality — onboarding data, capability assessments, sustainability certifications — requires T8 governance to be reliable and auditable.'
+    }},
+  { phase:'Buy', num:'2.2', name:'Commercial terms and JBPs',
+    desc:'Negotiating annual trading terms, joint business plans and supplier investment frameworks covering price, promotion and retail media.',
+    territories: {
+      T3:'Continuous JBP management based on real-time performance data replaces annual negotiation cycles — terms connect directly to live commercial outcomes.',
+      T5:'Retail media and data access become core JBP levers — the platform adds a data and media dimension to every supplier trading relationship.',
+      T6:'JBPs embed sustainability commitments, waste reduction targets and health improvement roadmaps as commercial performance metrics.',
+      T7:'AI co-pilots in commercial negotiations surface data, model scenarios and generate preparation material — improving quality and speed of commercial decisions.',
+      T8:'JBP performance data accuracy — volume tracking, promotional compliance, media attribution — requires T8 data infrastructure to be commercially credible.'
+    }},
+  { phase:'Buy', num:'2.3', name:'Demand forecasting',
+    desc:'Predicting customer demand at SKU, store and network level to inform buying, replenishment and production decisions.',
+    territories: {
+      T1:'Customer-level Nectar signals provide demand foresight ahead of basket manifestation — individual purchase history is a structural input into forecasting.',
+      T3:'Predictive demand sensing is the input node of the operating loop — accurate, real-time forecasts connect customer signals to commercial and supply decisions.',
+      T6:'Fresh category forecasting is a specialised requirement — shorter shelf life and volatile demand need dedicated capability to minimise waste while maintaining availability.',
+      T7:'AI-augmented forecasting allows planners to work with more signals and more granular exceptions — the territory builds on this as the foundation for autonomous demand sensing.',
+      T8:'Demand forecasting quality is entirely dependent on data quality and governance. T8 establishes the unified data platform, real-time signal layer and data standards that forecasting models run on.'
+    }},
+  { phase:'Buy', num:'2.4', name:'Supplier order management and PO',
+    desc:'Generating, managing and confirming purchase orders with suppliers across all categories and fulfilment modes.',
+    territories: {
+      T3:'Automated PO generation is a core loop output — supplier orders generated directly from demand forecasts without manual intervention.',
+      T7:'AI in order management reduces manual PO processing — colleagues focus on strategic supplier management while AI handles routine order execution.',
+      T8:'Order data accuracy and supplier data connectivity require T8 integration and data quality standards to support automated ordering reliably.'
+    }},
+  { phase:'Buy', num:'2.5', name:'Store ordering and replenishment',
+    desc:'Determining and placing store-level orders to maintain availability while managing waste and working capital.',
+    territories: {
+      T1:'Hyper-local assortment intelligence shapes store ordering by catchment; subscription and ambient replenishment triggers flow from customer-level signals.',
+      T2:'Smart replenishment powered by IoT sensing makes the replenishment operation invisible, freeing colleagues for service and experience delivery.',
+      T3:'Store-level automated replenishment is the downstream step of the loop — customer signals feed back through to generate store orders automatically.',
+      T6:'Fresh ordering discipline — right quantity, right frequency, per store — is critical to minimising waste while maintaining availability in fresh categories.',
+      T7:'AI replenishment tools give store operations greater availability visibility and more responsive exception handling.',
+      T8:'Replenishment signal quality — inventory data accuracy, demand signal timeliness, product master data integrity — all require T8 data foundations.'
+    }},
+  { phase:'Buy', num:'2.6', name:'Supplier performance and compliance',
+    desc:'Monitoring and managing supplier delivery performance, quality standards, sustainability commitments and regulatory compliance.',
+    territories: {
+      T5:'Supplier performance data shared through the platform enables more granular, evidence-based performance conversations.',
+      T6:'Emissions, packaging compliance, welfare standards and provenance verification are actively monitored and reported against commercial commitments.',
+      T7:'Automated performance scoring and compliance alerting extend the reach of a fixed compliance team across a much larger supplier base.',
+      T8:'Systematic supplier compliance monitoring requires structured data capture, integration with certification bodies and governance frameworks that T8 establishes.'
+    }},
+  { phase:'Buy', num:'2.7', name:'Food safety, quality assurance and traceability',
+    desc:'Ensuring product safety, quality standards and full supply chain traceability from farm to shelf.',
+    territories: {
+      T6:'Food safety and quality assurance is a foundational pillar — traceability from farm to shelf is a structural capability, not a marketing claim.',
+      T8:'Traceability requires end-to-end data integrity across supplier, logistics and in-store systems — T8 data governance and integration infrastructure is the enabling foundation.'
+    }},
+  { phase:'Buy', num:'2.8', name:'Own-label development and NPD',
+    desc:'Developing, testing and launching own-label products across all tiers from entry to premium.',
+    territories: {
+      T6:'Own-label development is the primary product-level expression of the Better Food territory — health, freshness and sustainability are built into the brief, not added as an afterthought.',
+      T7:'AI for product development — trend sensing, formulation support, packaging optimisation — accelerates NPD cycles and improves hit rates.',
+      T8:'Product data quality — nutritional data, ingredient transparency, allergen data accuracy — is a regulatory and commercial requirement that T8 data standards underpin.'
+    }},
+
+  // Move
+  { phase:'Move', num:'3.1', name:'Inbound',
+    desc:'Receiving, checking and processing supplier deliveries into distribution centres and direct-to-store.',
+    territories: {
+      T3:'Inbound operations are automated within the loop — receipt confirmation, quality checking and putaway connected to live inventory and demand systems.',
+      T6:'Quality rejection at inbound is a non-negotiable standard — product not meeting quality criteria is rejected at receipt, protecting the fresh category commitment.',
+      T7:'AI-assisted inbound operations require colleagues who can configure, supervise and exception-manage AI systems rather than execute manual receipt processes.',
+      T8:'Inbound data accuracy — receipt confirmation, quality data, provenance verification — feeds directly into inventory and demand systems and requires T8 data quality standards.'
+    }},
+  { phase:'Move', num:'3.2', name:'In-DC operations',
+    desc:'Warehouse operations including picking, packing, sorting and marshalling within distribution centres.',
+    territories: {
+      T3:'DC automation is the physical execution layer — warehouse operations execute the output of the commercial and supply chain decision loop.',
+      T4:'Dark store and MFC automation provides the high-throughput picking infrastructure for rapid and on-demand fulfilment within the convenience network.',
+      T7:'DC colleagues in the AI-Empowered Enterprise are supervisors, exception managers and system operators — the territory delivers the workforce transformation to match the automation investment.',
+      T8:'DC system data — throughput, accuracy, capacity utilisation — requires integration and quality standards to feed operational optimisation in real time.'
+    }},
+  { phase:'Move', num:'3.3', name:'Outbound, yard and dock',
+    desc:'Managing vehicle loading, yard operations and outbound despatch across the distribution network.',
+    territories: {
+      T3:'Outbound dispatch and yard management are system-generated and connected to route optimisation in real time.',
+      T7:'AI in outbound reduces manual coordination while requiring colleagues with capability to supervise automated systems and manage exceptions.',
+      T8:'Outbound data accuracy — load confirmation, departure times, vehicle tracking — is required for end-to-end supply chain visibility.'
+    }},
+  { phase:'Move', num:'3.4', name:'Secondary distribution',
+    desc:'Transporting goods from distribution centres to stores, dark stores and fulfilment nodes.',
+    territories: {
+      T3:'AI routing in secondary distribution is the last-mile execution of the loop — routes, vehicle allocation and delivery sequencing are dynamically optimised.',
+      T4:'Multi-mode secondary distribution — dedicated rapid fleet, scheduled consolidated, autonomous last-mile — operates as an integrated network serving all demand modes.',
+      T8:'Distribution data — route performance, delivery confirmation, temperature monitoring — requires integration into the unified data platform for operational optimisation.'
+    }},
+  { phase:'Move', num:'3.5', name:'Logistics inventory management',
+    desc:'Managing stock positions, replenishment triggers and inventory allocation across the logistics network.',
+    territories: {
+      T2:'Real-time store-level inventory from IoT sensors feeds live stock data back into the Autonomous Operating Loop — the store becomes a sensing node.',
+      T3:'Real-time inventory across the network is the connective tissue — inventory positions at every node feed continuously into commercial and replenishment decisions.',
+      T4:'Real-time inventory visibility across fulfilment nodes is the prerequisite for reliable on-demand promise delivery — without it, customer fulfilment fails.',
+      T6:'Date-code visibility and temperature monitoring across DC and store are needed to manage fresh waste and maintain quality standards throughout the chain.',
+      T8:'Real-time cross-network inventory management requires clean, integrated, governed inventory data across every node. T8 establishes the unified inventory data layer.'
+    }},
+  { phase:'Move', num:'3.6', name:'Reverse logistics and waste',
+    desc:'Managing returns, surplus stock, waste streams and circular economy flows across the network.',
+    territories: {
+      T6:'Surplus food is redirected to donation, composting and refurbishment flows designed into the operating model as standard — waste reduction is a structural operating commitment.',
+      T8:'Waste and returns data — volumes, reasons, costs, environmental impact — requires structured capture and governance to support compliance reporting and optimisation.'
+    }},
+
+  // Sell
+  { phase:'Sell', num:'4.1', name:'In-store presentation and merchandising',
+    desc:'Managing physical store layout, planograms, visual merchandising and in-store experience design.',
+    territories: {
+      T1:'ESLs and dynamic digital signage deliver personalised pricing at the physical shelf, bridging the customer data ecosystem into the store environment.',
+      T2:'Food theatre, experiential formats, provenance storytelling and community space design translate the Living Store ambition into the physical store.',
+      T4:'Local proximity assortment — the right range stocked at the nearest node — is the physical fulfilment dimension of the on-demand network.',
+      T6:'Food theatre, provenance storytelling and fresh product presentation are how the Better Food commitment is made visible and commercially compelling to customers.',
+      T7:'AI-enabled colleague tools bring product knowledge and customer insight to the shop floor — colleagues use co-pilots to answer questions and personalise the in-store service.',
+      T8:'Planogram data accuracy, ESL integration, and merchandising performance data all require T8 data quality and integration standards.'
+    }},
+  { phase:'Sell', num:'4.2', name:'Digital presentation',
+    desc:'Managing product content, search, recommendations and digital experience across app, web and third-party channels.',
+    territories: {
+      T1:'Every digital surface is customer-specific — search results, recommendations, basket suggestions and post-purchase content adapt to the individual.',
+      T2:'In-store digital channels enhance the physical visit — the Living Store uses digital to deepen, not replace, the in-store experience.',
+      T5:'Sponsored placement, search advertising and display media in the digital channel are the platform\'s primary revenue products.',
+      T7:'AI-generated content, search and recommendation capabilities are built and maintained by this territory — developer tooling and AI infrastructure underpin the digital surface.',
+      T8:'Product data quality — content accuracy, search indexing, recommendation signal integrity — directly determines digital conversion and is governed by T8 standards.'
+    }},
+  { phase:'Sell', num:'4.3', name:'Store replenishment to shelf',
+    desc:'Managing the flow of product from backroom to shelf, ensuring availability and planogram compliance.',
+    territories: {
+      T2:'Autonomous replenishment is foundational — if shelves are stocked by AI, colleagues are available for service and advisory roles that differentiate the Living Store.',
+      T3:'Autonomous shelf replenishment closes the store-level loop — AI-detected gaps trigger automated replenishment without colleague intervention.',
+      T4:'Shelf availability is the physical input to every fulfilment mode — on-demand convenience fails when product is not in-store and available to pick.',
+      T6:'Fresh shelf availability and date-code management on-shelf are the customer-facing output of the Better Food territory.',
+      T7:'Gap detection, replenishment triggering and planogram compliance monitoring require colleagues who can configure, supervise and exception-manage AI systems.',
+      T8:'Shelf availability data — gap detection accuracy, planogram compliance data, on-shelf inventory — requires T8 data quality and real-time integration standards.'
+    }},
+  { phase:'Sell', num:'4.4', name:'Transact (checkout and payment)',
+    desc:'Managing all payment and checkout experiences across in-store, self-checkout, scan-and-go and digital payment flows.',
+    territories: {
+      T1:'Agentic checkout flows, personalised payment preferences and loyalty-linked payment options make the transaction a seamless, identity-anchored moment.',
+      T2:'Frictionless checkout (scan-and-go, mobile, autonomous) releases store space and colleague time for experience and service delivery.',
+      T8:'Payment data, identity data and loyalty linkage at checkout require T8 consent management and data governance to be compliant and trustworthy.'
+    }},
+  { phase:'Sell', num:'4.5', name:'Pick (online order assembly)',
+    desc:'Assembling online grocery orders in-store, dark stores or MFCs for delivery or collection.',
+    territories: {
+      T2:'Ship-from-store and in-store pick make the physical estate part of the fulfilment network, adding a second revenue stream to the store footprint.',
+      T4:'Order assembly across modes (in-store, dark-store, MFC) — speed, accuracy and substitution management determine whether on-demand promises are kept.',
+      T8:'Pick accuracy data, substitution decision data, and fulfilment performance metrics require T8 data integration to support operational optimisation and customer experience.'
+    }},
+  { phase:'Sell', num:'4.6', name:'Fulfil and deliver',
+    desc:'Managing last-mile delivery and click-and-collect fulfilment across all speed tiers and modes.',
+    territories: {
+      T1:'Fulfilment mode preferences are tracked and anticipated as dimensions of the individual customer relationship.',
+      T2:'Store-based fulfilment (click and collect, ship from store, rapid last-mile) is a designed dimension of the store\'s dual role as transaction and fulfilment node.',
+      T4:'Fulfilment and delivery is the core expression of the on-demand territory — every mode (slot, rapid, click and collect, ambient) is part of the elastic convenience network.',
+      T8:'Delivery data — ETA accuracy, completion rates, customer experience data — requires T8 data integration to support operational performance management and customer trust.'
+    }},
+  { phase:'Sell', num:'4.7', name:'Customer contact and service',
+    desc:'Managing customer queries, complaints, accessibility needs and service interactions across all channels.',
+    territories: {
+      T1:'Accessibility preferences, known needs and interaction history are available at every service touchpoint — the relationship is continuous, not transactional.',
+      T2:'In-store human service — food expertise, accessibility, community health — is the human expression of the Living Store territory.',
+      T7:'Agentic service handles the majority of volume; human agents focus on exceptions and emotional complexity. The territory delivers the human-AI collaboration model for service.',
+      T8:'Customer service consent management — how agent-mediated interactions access, reference and use customer data — is directly governed by T8 consent frameworks.'
+    }},
+  { phase:'Sell', num:'4.8', name:'Loyalty, post-purchase engagement and repurchase trigger',
+    desc:'Managing the Nectar programme, post-purchase communications, personalised re-engagement and subscription mechanics.',
+    territories: {
+      T1:'Loyalty mechanics, post-purchase engagement, repurchase triggers and ambient subscription are the operational heartbeat of the adaptive customer relationship.',
+      T4:'Ambient replenishment and subscription triggers connect the fulfilment network to the loyalty ecosystem for automated, routine replenishment without customer effort.',
+      T5:'Nectar is the platform\'s customer-facing foundation — loyalty scale and engagement depth are the platform\'s most important commercial assets.',
+      T6:'Health-led loyalty personalisation — recommendations shaped by individual health goals and dietary preferences — is a core Better Food engagement mechanism.',
+      T7:'AI in loyalty operations allows a larger programme to be managed with the same or smaller team through augmentation — personalisation at scale requires AI infrastructure.',
+      T8:'Nectar loyalty operations depend entirely on the data platform, consent management and governance frameworks T8 establishes.'
+    }},
+  { phase:'Sell', num:'4.9', name:'Retail media and data monetisation',
+    desc:'Generating revenue from first-party data, advertising inventory, sponsored placements and commerce media across digital and physical channels.',
+    territories: {
+      T1:'First-party customer data and Nectar signals are the commercial product — the deeper the customer relationship, the more valuable the media asset.',
+      T5:'Retail media is the platform\'s primary revenue product — sponsored placement, display media, audience data and closed-loop measurement sold to supplier partners.',
+      T7:'AI-driven media optimisation, audience modelling and attribution measurement are built and maintained by the AI-Empowered Enterprise infrastructure.',
+      T8:'Media measurement credibility — attribution accuracy, audience data quality, consent-compliant data activation — requires T8 data governance and consent management foundations.'
+    }},
+  { phase:'Sell', num:'4.10', name:'Insight, analytics and data operations',
+    desc:'Generating commercial, customer and operational insights to support decision-making across all functions.',
+    territories: {
+      T1:'Customer insight and behavioural analytics are the intelligence layer of the adaptive relationship — understanding intent, context and household economics.',
+      T5:'Insight sold to supplier partners as a commercial product — the platform monetises analytical capability alongside media and data.',
+      T7:'AI-augmented analytics and automated insight generation are core AI Enterprise capabilities — the analyst role shifts from data processing to insight curation and action.',
+      T8:'Data operations — data quality, lineage, governance, access management — is the operational backbone of all analytics and insight capability. T8 is this territory\'s foundation.'
+    }}
+];
+
+// ── BUILD ─────────────────────────────────────────────────────────────────────
+
+const canvas = document.getElementById('canvas');
+const tooltip = document.getElementById('tooltip');
+const panel = document.getElementById('panel');
+const focusBanner = document.getElementById('focus-banner');
+const focusLabel = document.getElementById('focus-label');
+
+let activeFilter = 'all';
+
+function getHeatColor(count) {
+  if (count >= 6) return '#ef4444';
+  if (count >= 5) return '#f97316';
+  if (count >= 4) return '#f59e0b';
+  if (count >= 3) return '#84cc16';
+  return '#cbd5e1';
+}
+
+function getHeatOpacity(count) {
+  return Math.min(1, 0.3 + count * 0.12);
+}
+
+// Group by phase
+const byPhase = {};
+PHASES.forEach(p => byPhase[p] = []);
+ACTIVITIES.forEach(a => byPhase[a.phase].push(a));
+
+PHASES.forEach(phase => {
+  const col = document.createElement('div');
+  col.className = 'phase-col';
+  col.dataset.phase = phase;
+
+  const hdr = document.createElement('div');
+  hdr.className = 'phase-header';
+  hdr.innerHTML = `${phase} <span class="phase-count">${byPhase[phase].length} activities</span>`;
+  col.appendChild(hdr);
+
+  const cards = document.createElement('div');
+  cards.className = 'activity-cards';
+
+  byPhase[phase].forEach(act => {
+    const tList = Object.keys(act.territories);
+    const count = tList.length;
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.num = act.num;
+    card.style.setProperty('--heat-color', getHeatColor(count));
+    card.style.setProperty('--heat-opacity', getHeatOpacity(count));
+
+    card.innerHTML = `
+      <div class="card-num">${act.num}</div>
+      <div class="card-name">${act.name}</div>
+      <div class="card-dots">${tList.map(t => `<div class="tdot" data-t="${t}">${t.replace('T','')}</div>`).join('')}</div>
+      <div class="heat-badge">${count}</div>
+    `;
+
+    // Click card → open panel
+    card.addEventListener('click', (e) => {
+      if (e.target.classList.contains('tdot')) return;
+      openPanel(act);
+    });
+
+    // Click tdot → filter by territory
+    card.querySelectorAll('.tdot').forEach(dot => {
+      dot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const t = dot.dataset.t;
+        setFilter(t === activeFilter ? 'all' : t);
+      });
+    });
+
+    cards.appendChild(card);
+  });
+
+  col.appendChild(cards);
+  canvas.appendChild(col);
+});
+
+// ── FILTER ────────────────────────────────────────────────────────────────────
+
+function setFilter(t) {
+  activeFilter = t;
+
+  // Update chips
+  document.querySelectorAll('.chip').forEach(chip => {
+    chip.classList.toggle('active', chip.dataset.t === t);
+  });
+
+  // Update cards
+  document.querySelectorAll('.card').forEach(card => {
+    const num = card.dataset.num;
+    const act = ACTIVITIES.find(a => a.num === num);
+    if (!act) return;
+    const tList = Object.keys(act.territories);
+    if (t === 'all') {
+      card.classList.remove('dimmed', 'focused');
+      card.style.removeProperty('--focus-color');
+    } else if (tList.includes(t)) {
+      card.classList.remove('dimmed');
+      card.classList.add('focused');
+      card.style.setProperty('--focus-color', T_COLORS[t]);
+    } else {
+      card.classList.add('dimmed');
+      card.classList.remove('focused');
+    }
+  });
+
+  // Focus banner
+  if (t === 'all') {
+    focusBanner.classList.remove('show');
+  } else {
+    focusLabel.textContent = `${t} · ${TERRITORIES[t].short}`;
+    focusBanner.classList.add('show');
+    focusBanner.style.background = T_COLORS[t];
+  }
+}
+
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', () => setFilter(chip.dataset.t));
+});
+
+focusBanner.addEventListener('click', () => setFilter('all'));
+
+// ── TOOLTIP ───────────────────────────────────────────────────────────────────
+
+let ttTarget = null;
+
+document.querySelectorAll('.tdot').forEach(dot => {
+  dot.addEventListener('mouseenter', (e) => {
+    const t = dot.dataset.t;
+    const ter = TERRITORIES[t];
+    document.getElementById('tt-title').textContent = ter.name;
+    document.getElementById('tt-type').textContent = ter.type;
+    document.getElementById('tt-type').style.color = T_COLORS[t];
+    document.getElementById('tt-body').textContent = ter.desc;
+    tooltip.classList.add('visible');
+    ttTarget = dot;
+    positionTooltip(e);
+  });
+  dot.addEventListener('mousemove', positionTooltip);
+  dot.addEventListener('mouseleave', () => {
+    tooltip.classList.remove('visible');
+    ttTarget = null;
+  });
+});
+
+function positionTooltip(e) {
+  const tw = tooltip.offsetWidth || 300;
+  const th = tooltip.offsetHeight || 120;
+  let x = e.clientX + 14;
+  let y = e.clientY - 14;
+  if (x + tw > window.innerWidth - 10) x = e.clientX - tw - 14;
+  if (y + th > window.innerHeight - 10) y = e.clientY - th;
+  tooltip.style.left = x + 'px';
+  tooltip.style.top = y + 'px';
+}
+
+// ── DETAIL PANEL ──────────────────────────────────────────────────────────────
+
+function openPanel(act) {
+  document.getElementById('p-phase').textContent = act.phase;
+  document.getElementById('p-phase').style.color = PHASE_COLORS[act.phase];
+  document.getElementById('p-num').textContent = act.num;
+  document.getElementById('p-name').textContent = act.name;
+  document.getElementById('p-desc').textContent = act.desc;
+
+  const container = document.getElementById('p-territories');
+  container.innerHTML = '';
+
+  Object.entries(act.territories).forEach(([t, desc]) => {
+    const ter = TERRITORIES[t];
+    const item = document.createElement('div');
+    item.className = 'territory-item';
+    item.innerHTML = `
+      <div class="territory-pill" style="background:${T_COLORS[t]}">${t}</div>
+      <div>
+        <div class="territory-item-name">${ter.short}</div>
+        <div class="territory-item-desc">${desc}</div>
+      </div>
+    `;
+    container.appendChild(item);
+  });
+
+  panel.classList.add('open');
+}
+
+document.getElementById('panel-close').addEventListener('click', () => {
+  panel.classList.remove('open');
+});
+
+canvas.addEventListener('click', (e) => {
+  if (!e.target.closest('.card') && !e.target.closest('.panel')) {
+    panel.classList.remove('open');
+  }
+});
+</script>
+</body>
+</html>

@@ -13,3 +13,5 @@ outputs/
 
 # Editor
 .claude/
+.env.save
+open_fleek.command

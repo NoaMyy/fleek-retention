@@ -1,58 +1,42 @@
 """
-Classify each account into one of five segments:
-  BROKER_RELIANT    — AM-owned, high broker reliance, low self-serve activity
-  HEALTHY_AM        — AM-owned, already buying via product
-  TRUE_HEADROOM     — Self-serve: high engagement, low GMV (best upsell opportunity)
-  PASSIVE_BUYER     — Self-serve: high GMV, low engagement (churn risk)
-  SELF_SERVE_OTHER  — Self-serve: all other accounts (Already There or Dormant)
+Classify each account into one of three segments:
 
-Self-serve quadrant splits on median engagement score and median GMV within
-the self-serve population (computed dynamically per upload).
+  HEALTHY_AM     — AM-owned, already self-serving ≥70% of orders.
+                   Not a migration burden — no archetype profiling needed.
+
+  BROKER_RELIANT — AM-owned, self-serve ratio < 70%.
+                   Needs migration support — receives one of five archetypes
+                   (ENTRENCHED_BROKER, HABITUAL_BROKER, PLATFORM_CURIOUS,
+                    DUAL_CHANNEL, MID_MIGRATION) assigned in plays.py.
+
+  SELF_SERVE     — Not account-managed.
+                   Receives one of four archetypes based on intent/GMV signals
+                   (SS_ACTIVE_BUYER, SS_HIGH_INTENT, SS_HIGH_SPENDER_LOW_ENG,
+                    SS_LOW_ENGAGEMENT) assigned in plays.py.
 """
 import pandas as pd
 
-# Thresholds (tuneable)
-BROKER_RELIANCE_HIGH = 50  # % manual orders
-APP_DAYS_LOW = 10          # 6-month app active days
-PDP_VIEWS_LOW = 20         # 6-month PDP views
+# Healthy AM threshold: accounts self-serving 70%+ of their orders need no migration push
+HEALTHY_AM_SS_RATIO = 0.70
 
 
 def segment(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    broker_reliant = (
-        df["is_account_managed"]
-        & (df["broker_reliance_pct"] >= BROKER_RELIANCE_HIGH)
-        & (
-            (df["app_active_days_6m"] <= APP_DAYS_LOW)
-            | (df["pdp_views_6m"] <= PDP_VIEWS_LOW)
-        )
-    )
+    # Compute ss_ratio for all AM accounts
+    total_orders = (df["manual_orders"] + df["self_serve_orders"]).replace(0, 1)
+    df["ss_ratio"] = (df["self_serve_orders"] / total_orders).clip(0, 1)
 
-    healthy_am = df["is_account_managed"] & ~broker_reliant
+    # HEALTHY_AM: account-managed AND already ≥70% self-serve
+    healthy_am = df["is_account_managed"] & (df["ss_ratio"] >= HEALTHY_AM_SS_RATIO)
 
-    self_serve = ~df["is_account_managed"]
-
-    # Dynamic medians computed from self-serve population
-    ss_df = df[self_serve]
-    eng_median = ss_df["engagement_score"].median() if len(ss_df) > 0 else 0
-    gmv_median = ss_df["gmv_total_6m"].median() if len(ss_df) > 0 else 0
-
-    high_eng = self_serve & (df["engagement_score"] >= eng_median)
-    low_eng  = self_serve & (df["engagement_score"] <  eng_median)
-    high_gmv = self_serve & (df["gmv_total_6m"]     >= gmv_median)
-    low_gmv  = self_serve & (df["gmv_total_6m"]     <  gmv_median)
-
-    true_headroom = high_eng & low_gmv   # high intent, room to grow
-    passive_buyer = low_eng  & high_gmv  # high value, low stickiness
-    ss_other      = self_serve & ~true_headroom & ~passive_buyer
+    # BROKER_RELIANT: account-managed AND not yet at the healthy threshold
+    broker_reliant = df["is_account_managed"] & ~healthy_am
 
     def assign(row_idx):
-        if broker_reliant.iloc[row_idx]:  return "BROKER_RELIANT"
-        if healthy_am.iloc[row_idx]:      return "HEALTHY_AM"
-        if true_headroom.iloc[row_idx]:   return "TRUE_HEADROOM"
-        if passive_buyer.iloc[row_idx]:   return "PASSIVE_BUYER"
-        return "SELF_SERVE_OTHER"
+        if broker_reliant.iloc[row_idx]: return "BROKER_RELIANT"
+        if healthy_am.iloc[row_idx]:     return "HEALTHY_AM"
+        return "SELF_SERVE"
 
     df["segment"] = [assign(i) for i in range(len(df))]
 

@@ -97,32 +97,25 @@ with st.sidebar:
     with st.expander("📖 Category Legend", expanded=False):
         st.markdown("""
 **🟡 Broker Managed**
-Account-managed buyers where the majority of orders are placed via a broker rather than the app.
-- *Goal:* migrate to self-serve ordering
-- *Signal:* broker reliance ≥ 50%, low app activity
-- *Play:* Broker Migration — move through journey positions until they graduate
+Account-managed buyers with ss_ratio < 70%. Orders routed via AM — migration needed.
+- *Archetypes:* Entrenched Broker · Habitual Broker · Platform Curious · Dual Channel · Mid-Migration
+- *Play:* Broker Migration — ranked by burden score
 
 ---
 
 **🔵 Healthy AM**
-Account-managed buyers already transacting through the platform with good engagement.
+Account-managed buyers with ss_ratio ≥ 70%. Not a migration burden.
 - *Goal:* retain and grow GMV
-- *Signal:* account-managed, not broker-reliant
-- *Play:* AM Retention — priority by GMV value
+- *Play:* AM Retention — priority: declining → growing → stable
 
 ---
 
-**🟢 True Headroom**
-Self-serve buyers with high engagement (above-median) but low spend (below-median GMV).
-- *Goal:* convert intent into purchases — strongest upsell opportunity
-- *Play:* Self-Serve Nudge — targeted feature activation
-
----
-
-**🟠 Passive Buyer**
-Self-serve buyers with high GMV (above-median) but low engagement (below-median).
-- *Goal:* re-activate before they go quiet — prevent churn
-- *Play:* Re-engagement nudge — remind them what they're missing
+**🟢 Self-Serve**
+Not account-managed. Four archetypes by intent and GMV signals.
+- **Active Buyer** — top-decile orders, multi-month buying. Nudge: Bundle.
+- **High Intent** — active chat/offers, not closing. Nudge: Make an Offer.
+- **High Spender, Low Eng.** — high GMV, disengaged. Nudge: Chat.
+- **Low Engagement** — low spend, low signal. Nudge: Video Call.
         """)
 
     with st.expander("🗺 Broker Journey Stages", expanded=False):
@@ -196,9 +189,21 @@ def _render_broker_cards(broker_df: "pd.DataFrame") -> None:
         gmv       = row.get("gmv_total_6m", 0)
         trend     = row.get("gmv_trend", "—")
         journey   = JOURNEY_LABELS.get(row.get("journey_position", ""), "—")
+        burden    = row.get("burden_score", 0)
+        _arch_key = row.get("broker_archetype", "")
+        _arch_display_map = {
+            "ENTRENCHED_BROKER": "Entrenched Broker Buyer",
+            "HABITUAL_BROKER":   "Habitual Broker Buyer",
+            "PLATFORM_CURIOUS":  "Broker Reliant, Platform Curious",
+            "DUAL_CHANNEL":      "Active Dual-Channel Buyer",
+            "MID_MIGRATION":     "Mid-Migration Self-Server",
+        }
+        arch = _arch_display_map.get(_arch_key, _arch_key.replace("_", " ").title() if _arch_key else "—")
         just      = row.get("justification", "")
 
         metrics = "".join([
+            _metric_html("Archetype", arch),
+            _metric_html("Burden Score", f"{burden:.0f}/100"),
             _metric_html("Broker Reliance", f"{broker_pct:.0f}%"),
             _metric_html("Manual Orders", str(manual)),
             _metric_html("Self-Serve Orders", str(ss_orders)),
@@ -216,27 +221,29 @@ def _render_broker_cards(broker_df: "pd.DataFrame") -> None:
 
 
 def _render_ss_cards(ss_df: "pd.DataFrame", card_class: str) -> None:
+    from pipeline.plays import SS_ARCHETYPE_DISPLAY
     _card_css()
     for _, row in ss_df.iterrows():
         rank    = int(row.get("seg_rank", 0))
         account = row.get("account_id", "")
         country = row.get("country", "")
-        eng     = row.get("engagement_score", 0)
-        pdp     = int(row.get("pdp_views_6m", 0))
-        days    = int(row.get("app_active_days_6m", 0))
+        arch    = SS_ARCHETYPE_DISPLAY.get(row.get("ss_archetype", ""), "—")
+        orders  = int(row.get("orders_6m", 0))
+        chat    = int(row.get("chat_threads", 0))
+        offers  = int(row.get("make_an_offer_6m", 0))
         gmv     = row.get("gmv_total_6m", 0)
-        gmv_feb = row.get("gmv_feb", 0)
         trend   = row.get("gmv_trend", "—")
         nudge   = NUDGE_LABELS.get(row.get("nudge_feature", ""), "—")
         just    = row.get("justification", "")
 
         metrics = "".join([
-            _metric_html("Engagement Score", f"{eng:.0f}"),
-            _metric_html("App Days", str(days)),
-            _metric_html("PDP Views", str(pdp)),
+            _metric_html("Archetype", arch),
+            _metric_html("Orders (6m)", str(orders)),
+            _metric_html("Chats", str(chat)),
+            _metric_html("Offers", str(offers)),
             _metric_html("GMV (6m)", f"£{gmv:,.0f}"),
             _metric_html("GMV Trend", trend),
-            _metric_html("Recommended Feature", nudge),
+            _metric_html("Recommended Action", nudge),
         ])
         st.markdown(f"""
         <div class="fleek-card {card_class}">
@@ -250,17 +257,13 @@ def _render_ss_cards(ss_df: "pd.DataFrame", card_class: str) -> None:
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _run_pipeline(uploaded_bytes: bytes, filename: str) -> tuple:
-    from pipeline.clean import load_and_clean, save_versioned_upload, merge_into_master
+    from pipeline.clean import load_and_clean, merge_into_master
     from pipeline.segment import segment
     from pipeline.prioritise import prioritise
     from pipeline.plays import assign_plays
     from agents.drafter import draft_messages
 
     log = []
-
-    # Save versioned upload copy
-    versioned_path = save_versioned_upload(uploaded_bytes, filename)
-    log.append(f"💾 Saved versioned copy: `{os.path.basename(versioned_path)}`")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         tmp.write(uploaded_bytes)
@@ -309,20 +312,16 @@ def _run_pipeline(uploaded_bytes: bytes, filename: str) -> tuple:
         counts = df["segment"].value_counts().to_dict()
         broker_n = counts.get("BROKER_RELIANT", 0)
         am_n = counts.get("HEALTHY_AM", 0)
-        ss_th = counts.get("TRUE_HEADROOM", 0)
-        ss_pb = counts.get("PASSIVE_BUYER", 0)
-        ss_other = counts.get("SELF_SERVE_OTHER", 0)
+        ss_n_seg = counts.get("SELF_SERVE", 0)
         log.append(
             f"✅ Segmented — 🟡 Broker Managed: **{broker_n}** · "
             f"🔵 Healthy AM: **{am_n}** · "
-            f"🟢 Self-Serve: **{ss_th + ss_pb + ss_other}** "
-            f"({ss_th} true headroom · {ss_pb} passive buyer · {ss_other} other)"
+            f"🟢 Self-Serve: **{ss_n_seg}**"
         )
         log.append(
-            "_Criteria — Broker Managed: account-managed + ≥50% broker reliance + low app activity. "
-            "Healthy AM: account-managed, not broker-reliant. "
-            "True Headroom: self-serve with engagement ≥ median but GMV < median. "
-            "Passive Buyer: self-serve with GMV ≥ median but engagement < median._"
+            "_Criteria — Broker Managed: account-managed, ss_ratio < 70%. "
+            "Healthy AM: account-managed, ss_ratio ≥ 70%. "
+            "Self-Serve: not account-managed — archetypes assigned by intent and GMV signals._"
         )
 
         # 3. Prioritise
@@ -379,9 +378,10 @@ def _get_journey_context(row):
     elif seg == "HEALTHY_AM":
         health = row.get("health_status", "stable") or "stable"
         return {"growing": "🟢 Growing", "declining": "🔴 Declining", "stable": "🟡 Stable"}.get(health, health.title())
-    elif seg in ("TRUE_HEADROOM", "PASSIVE_BUYER", "SELF_SERVE_OTHER"):
-        nudge = row.get("nudge_feature", "") or ""
-        return NUDGE_LABELS.get(nudge, nudge)
+    elif seg == "SELF_SERVE":
+        from pipeline.plays import SS_ARCHETYPE_DISPLAY
+        arch = row.get("ss_archetype", "") or ""
+        return SS_ARCHETYPE_DISPLAY.get(arch, arch.replace("_", " ").title() if arch else "—")
     return "—"
 
 
@@ -389,7 +389,7 @@ def _get_engagement_method(row):
     seg = row.get("segment", "")
     if seg == "BROKER_RELIANT":
         return "SMS / Direct outreach"
-    elif seg in ("TRUE_HEADROOM", "PASSIVE_BUYER", "SELF_SERVE_OTHER"):
+    elif seg == "SELF_SERVE":
         nudge = row.get("nudge_feature", "") or ""
         return NUDGE_LABELS.get(nudge, nudge)
     return "SMS / Account Manager"
@@ -403,49 +403,10 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
-# ── version history helpers ───────────────────────────────────────────────────
-VERSIONS_DIR = "data/versions"
-os.makedirs(VERSIONS_DIR, exist_ok=True)
-
-
-def _list_versions() -> list[str]:
-    """Return versioned upload files sorted newest first."""
-    files = [f for f in os.listdir(VERSIONS_DIR) if f.endswith(".xlsx")]
-    return sorted(files, reverse=True)
-
-
 # ── header ────────────────────────────────────────────────────────────────────
 st.title("🧥 Fleek Retention Pipeline")
 st.caption("Segment · Prioritise · Play · Draft · Push")
 st.divider()
-
-# ── previous uploads sidebar ─────────────────────────────────────────────────
-with st.sidebar:
-    st.header("Previous Uploads")
-    _versions = _list_versions()
-    if not _versions:
-        st.caption("No previous uploads found.")
-    else:
-        _selected = st.selectbox(
-            "Load a previous dataset",
-            options=_versions,
-            index=None,
-            placeholder="Choose a file…",
-        )
-        if _selected and _selected != st.session_state.get("upload_name"):
-            if st.button("Load", use_container_width=True):
-                _path = os.path.join(VERSIONS_DIR, _selected)
-                with st.spinner(f"Running pipeline on `{_selected}`…"):
-                    try:
-                        df, log, stats = _run_pipeline(open(_path, "rb").read(), _selected)
-                        st.session_state.df = df
-                        st.session_state.log = log
-                        st.session_state.stats = stats
-                        st.session_state.upload_name = _selected
-                        st.session_state.sg_status = None
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Failed to load: {exc}")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # SECTION 1: UPLOAD
@@ -488,9 +449,13 @@ if st.session_state.df is not None:
 
     broker_n = int((df["segment"] == "BROKER_RELIANT").sum())
     am_n = int((df["segment"] == "HEALTHY_AM").sum())
-    ss_n = int(df["segment"].isin(["TRUE_HEADROOM", "PASSIVE_BUYER", "SELF_SERVE_OTHER"]).sum())
-    ss_th = int((df["segment"] == "TRUE_HEADROOM").sum())
-    ss_pb = int((df["segment"] == "PASSIVE_BUYER").sum())
+    ss_n = int((df["segment"] == "SELF_SERVE").sum())
+    ss_df_all = df[df["segment"] == "SELF_SERVE"].copy()
+    ss_arch_counts = ss_df_all.get("ss_archetype", pd.Series(dtype=str)).value_counts().to_dict() if "ss_archetype" in ss_df_all.columns else {}
+    ss_active  = ss_arch_counts.get("SS_ACTIVE_BUYER", 0)
+    ss_intent  = ss_arch_counts.get("SS_HIGH_INTENT", 0)
+    ss_spender = ss_arch_counts.get("SS_HIGH_SPENDER_LOW_ENG", 0)
+    ss_low_eng = ss_arch_counts.get("SS_LOW_ENGAGEMENT", 0)
 
     # ── What Changed summary ──────────────────────────────────────────────────
     with st.expander("🔍 What Changed in This Upload", expanded=True):
@@ -514,18 +479,15 @@ if st.session_state.df is not None:
         growing   = int(((df["segment"] == "HEALTHY_AM") & (df["health_status"] == "growing")).sum())
         stable    = int(((df["segment"] == "HEALTHY_AM") & (df["health_status"] == "stable")).sum())
         declining = int(((df["segment"] == "HEALTHY_AM") & (df["health_status"] == "declining")).sum())
-        ss_other  = int((df["segment"] == "SELF_SERVE_OTHER").sum())
 
         seg_summary = (
-            f"🟡 **Broker Managed: {broker_n}** — account-managed with ≥50% orders via broker, low app activity. "
+            f"🟡 **Broker Managed: {broker_n}** — account-managed with ss_ratio < 70%. "
             f"Goal: migrate to self-serve.  \n"
-            f"🔵 **Healthy AM: {am_n}** — account-managed, transacting on platform "
+            f"🔵 **Healthy AM: {am_n}** — account-managed, ss_ratio ≥ 70% "
             f"({growing} growing · {stable} stable · {declining} declining). "
             f"Goal: retain and grow.  \n"
-            f"🟢 **True Headroom: {ss_th}** — self-serve with high engagement but low spend. "
-            f"Strongest upsell opportunity.  \n"
-            f"🟠 **Passive Buyer: {ss_pb}** — self-serve with high GMV but low engagement. "
-            f"Re-activation needed to reduce churn risk."
+            f"🟢 **Self-Serve: {ss_n}** — Active Buyers: {ss_active} · "
+            f"High Intent: {ss_intent} · High Spender: {ss_spender} · Low Engagement: {ss_low_eng}."
         )
         st.markdown(seg_summary)
 
@@ -534,6 +496,7 @@ if st.session_state.df is not None:
     m2.metric("🟡 Broker Managed", broker_n)
     m3.metric("🔵 Healthy AM", am_n)
     m4.metric("🟢 Self-Serve", ss_n)
+
 
     dl1, dl2, _ = st.columns([1, 1, 4])
     with dl1:
@@ -600,8 +563,8 @@ if st.session_state.df is not None:
     with ch2:
         st.subheader("GMV at risk")
         declining_mask = (df["segment"] == "HEALTHY_AM") & (df["health_status"] == "declining")
-        passive_mask = df["segment"] == "PASSIVE_BUYER"
-        at_risk_gmv = df[declining_mask | passive_mask]["gmv_total_6m"].sum()
+        high_spender_mask = (df["segment"] == "SELF_SERVE") & (df.get("ss_archetype", pd.Series("", index=df.index)) == "SS_HIGH_SPENDER_LOW_ENG")
+        at_risk_gmv = df[declining_mask | high_spender_mask]["gmv_total_6m"].sum()
         total_gmv = df["gmv_total_6m"].sum()
         safe_gmv = total_gmv - at_risk_gmv
         risk_pct = (at_risk_gmv / total_gmv * 100) if total_gmv > 0 else 0
@@ -613,7 +576,7 @@ if st.session_state.df is not None:
         risk_data = pd.DataFrame([
             {"Category": "Safe", "GMV": safe_gmv},
             {"Category": "Declining AM", "GMV": df[declining_mask]["gmv_total_6m"].sum()},
-            {"Category": "Passive Buyer", "GMV": df[passive_mask]["gmv_total_6m"].sum()},
+            {"Category": "High Spender, Low Eng.", "GMV": df[high_spender_mask]["gmv_total_6m"].sum()},
         ])
         risk_chart = (
             alt.Chart(risk_data)
@@ -627,7 +590,7 @@ if st.session_state.df is not None:
                 color=alt.Color(
                     "Category:N",
                     scale=alt.Scale(
-                        domain=["Safe", "Declining AM", "Passive Buyer"],
+                        domain=["Safe", "Declining AM", "High Spender, Low Eng."],
                         range=["#27AE60", "#E24B4A", "#E67E22"],
                     ),
                     legend=None,
@@ -639,16 +602,16 @@ if st.session_state.df is not None:
         st.altair_chart(risk_chart, use_container_width=True)
 
         with st.expander("👁 View at-risk accounts", expanded=False):
-            _at_risk_cols = [c for c in ["account_id", "country", "segment", "health_status", "gmv_total_6m", "gmv_trend"] if c in df.columns]
-            _at_risk = df[declining_mask | passive_mask][_at_risk_cols].copy()
+            _at_risk_cols = [c for c in ["account_id", "country", "segment", "ss_archetype", "health_status", "gmv_total_6m", "gmv_trend"] if c in df.columns]
+            _at_risk = df[declining_mask | high_spender_mask][_at_risk_cols].copy()
             _at_risk["Risk Reason"] = _at_risk.apply(
-                lambda r: "🔴 Declining AM" if r.get("segment") == "HEALTHY_AM" else "🟠 Passive Buyer", axis=1
+                lambda r: "🔴 Declining AM" if r.get("segment") == "HEALTHY_AM" else "🟠 High Spender, Low Engagement", axis=1
             )
             _at_risk_display = _at_risk.rename(columns={
                 "account_id": "Account", "country": "Country",
                 "segment": "Segment", "health_status": "Health",
                 "gmv_total_6m": "GMV 6m (£)", "gmv_trend": "Trend",
-            }).drop(columns=["Segment"], errors="ignore")
+            }).drop(columns=["Segment", "ss_archetype"], errors="ignore")
             st.dataframe(
                 _at_risk_display.style.format({"GMV 6m (£)": "£{:,.0f}"}),
                 use_container_width=True, hide_index=True,
@@ -693,7 +656,7 @@ if st.session_state.df is not None:
 
     with ch4:
         st.subheader("Feature adoption (self-serve)")
-        ss_mask = df["segment"].isin(["TRUE_HEADROOM", "PASSIVE_BUYER", "SELF_SERVE_OTHER"])
+        ss_mask = df["segment"] == "SELF_SERVE"
         ss_total = int(ss_mask.sum()) or 1
         feat_rows = [
             ("Bundle", "bundle_orders"),
@@ -738,11 +701,10 @@ if st.session_state.df is not None:
         "Each row includes a justification explaining why the account is positioned where it is."
     )
 
-    tab_broker, tab_am, tab_th, tab_pb = st.tabs([
+    tab_broker, tab_am, tab_ss = st.tabs([
         f"🟡 Broker Managed ({broker_n})",
         f"🔵 Healthy AM ({am_n})",
-        f"🟢 True Headroom ({ss_th})",
-        f"🟠 Passive Buyer ({ss_pb})",
+        f"🟢 Self-Serve ({ss_n})",
     ])
 
     with tab_broker:
@@ -756,7 +718,10 @@ if st.session_state.df is not None:
             )
             display_cols = {
                 "seg_rank": "#", "account_id": "Account ID",
-                "country": "Location", "broker_reliance_pct": "Broker %",
+                "country": "Location",
+                "broker_archetype": "Archetype",
+                "burden_score": "Burden Score",
+                "broker_reliance_pct": "Broker %",
                 "manual_orders": "Manual Orders", "self_serve_orders": "Self-Serve Orders",
                 "orders_6m": "Total Orders (6m)", "gmv_total_6m": "GMV (£)",
                 "gmv_trend": "GMV Trend",
@@ -770,11 +735,13 @@ if st.session_state.df is not None:
                     JOURNEY_LABELS
                 ).fillna(display["Journey Position"])
             st.dataframe(
-                display.style.format({"GMV (£)": "£{:,.0f}", "Broker %": "{:.0f}%"}),
+                display.style.format({"GMV (£)": "£{:,.0f}", "Broker %": "{:.0f}%", "Burden Score": "{:.0f}"}),
                 use_container_width=True, hide_index=True,
                 column_config={
+                    "Archetype":           st.column_config.TextColumn("Archetype", width="medium"),
+                    "Burden Score":        st.column_config.ProgressColumn("Burden Score", min_value=0, max_value=100, format="%d"),
                     "Engagement Behaviour": st.column_config.TextColumn("Engagement Behaviour", width="large"),
-                    "Journey Position": st.column_config.TextColumn("Journey Position", width="medium"),
+                    "Journey Position":    st.column_config.TextColumn("Journey Position", width="medium"),
                 },
             )
             st.divider()
@@ -824,63 +791,74 @@ if st.session_state.df is not None:
                 },
             )
 
+    _SS_ARCH_TABS = [
+        ("SS_ACTIVE_BUYER",         "🏆 Active Buyers",           "fleek-card-headroom",
+         "Ranked by GMV. Top-decile order frequency buying across multiple months. Goal: bundle for efficiency and grow spend."),
+        ("SS_HIGH_INTENT",          "🎯 High Intent",             "fleek-card-headroom",
+         "Ranked by chat threads. Active negotiators (chat + offers) who aren't closing. Goal: direct nudge to convert intent into orders."),
+        ("SS_HIGH_SPENDER_LOW_ENG", "💰 High Spender, Low Eng.", "fleek-card-passive",
+         "Ranked by GMV. High spend but not engaging with platform features. Goal: re-engage before they go quiet."),
+        ("SS_LOW_ENGAGEMENT",       "💤 Low Engagement",          "fleek-card-passive",
+         "Ranked by GMV. Low spend and low signal. Goal: feature introduction to build purchase intent."),
+    ]
+
     def _render_ss_tab(seg_df, caption_text):
         if seg_df.empty:
-            st.info("No accounts in this segment.")
+            st.info("No accounts in this archetype.")
             return
         st.caption(caption_text)
         display_cols = {
             "seg_rank": "#", "account_id": "Account ID", "country": "Country",
-            "self_serve_orders": "Self-Serve Orders",
+            "ss_archetype": "Archetype",
+            "orders_6m": "Orders (6m)", "self_serve_orders": "Self-Serve Orders",
             "engagement_score": "Engagement Score",
             "pdp_views_6m": "PDP Views", "app_active_days_6m": "App Days",
-            "gmv_total_6m": "GMV 6m (£)",
-            "gmv_trend": "GMV Trend",
+            "gmv_total_6m": "GMV 6m (£)", "gmv_trend": "GMV Trend",
             "make_an_offer_6m": "Offers", "chat_threads": "Chats",
-            "video_call_requests": "Video Calls",
-            "bundle_orders": "Bundle Orders", "handpick_orders": "Handpick Orders",
-            "bundle_gmv_share_pct": "Bundle GMV %",
-            "nudge_feature": "Recommended Feature", "justification": "Justification",
+            "nudge_feature": "Recommended Action", "justification": "Justification",
         }
         avail = [c for c in display_cols if c in seg_df.columns]
         display = seg_df[avail].rename(columns=display_cols).copy()
-        if "Recommended Feature" in display.columns:
-            display["Recommended Feature"] = display["Recommended Feature"].map(
+        if "Recommended Action" in display.columns:
+            display["Recommended Action"] = display["Recommended Action"].map(
                 NUDGE_LABELS
-            ).fillna(display["Recommended Feature"])
+            ).fillna(display["Recommended Action"])
+        if "Archetype" in display.columns:
+            from pipeline.plays import SS_ARCHETYPE_DISPLAY
+            display["Archetype"] = display["Archetype"].map(SS_ARCHETYPE_DISPLAY).fillna(display["Archetype"])
         fmt = {"GMV 6m (£)": "£{:,.0f}", "Engagement Score": "{:.1f}"}
         st.dataframe(
             display.style.format(fmt),
             use_container_width=True, hide_index=True,
             column_config={
-                "Justification":        st.column_config.TextColumn("Justification", width="large"),
-                "Recommended Feature":  st.column_config.TextColumn("Recommended Feature", width="medium"),
+                "Justification":     st.column_config.TextColumn("Justification", width="large"),
+                "Recommended Action": st.column_config.TextColumn("Recommended Action", width="medium"),
+                "Archetype":         st.column_config.TextColumn("Archetype", width="medium"),
             },
         )
 
-    with tab_th:
-        th_df = df[df["segment"] == "TRUE_HEADROOM"].copy()
-        _render_ss_tab(
-            th_df,
-            "Ranked by engagement score (highest intent first). "
-            "High engagement + low spend = best upsell opportunity — focus on converting browsing to buying.",
-        )
-        if not th_df.empty:
-            st.divider()
-            with st.expander("📋 Account Summaries", expanded=True):
-                _render_ss_cards(th_df, "fleek-card-headroom")
-
-    with tab_pb:
-        pb_df = df[df["segment"] == "PASSIVE_BUYER"].copy()
-        _render_ss_tab(
-            pb_df,
-            "Ranked by GMV (highest value at risk first). "
-            "High spend + low engagement = churn risk — re-activate before they go quiet.",
-        )
-        if not pb_df.empty:
-            st.divider()
-            with st.expander("📋 Account Summaries", expanded=True):
-                _render_ss_cards(pb_df, "fleek-card-passive")
+    with tab_ss:
+        _ss_data = df[df["segment"] == "SELF_SERVE"].copy()
+        if _ss_data.empty:
+            st.info("No self-serve accounts in this portfolio.")
+        else:
+            _arch_tab_labels = [label for _, label, _, _ in _SS_ARCH_TABS]
+            _arch_counts_for_tabs = {
+                arch: int((_ss_data.get("ss_archetype", pd.Series(dtype=str)) == arch).sum())
+                for arch, _, _, _ in _SS_ARCH_TABS
+            }
+            _arch_tab_objs = st.tabs([
+                f"{label} ({_arch_counts_for_tabs.get(arch, 0)})"
+                for arch, label, _, _ in _SS_ARCH_TABS
+            ])
+            for _tab_obj, (arch, _label, card_class, caption) in zip(_arch_tab_objs, _SS_ARCH_TABS):
+                with _tab_obj:
+                    _arch_df = _ss_data[_ss_data.get("ss_archetype", pd.Series(dtype=str)) == arch].copy() if "ss_archetype" in _ss_data.columns else pd.DataFrame()
+                    _render_ss_tab(_arch_df, caption)
+                    if not _arch_df.empty:
+                        st.divider()
+                        with st.expander("📋 Account Summaries", expanded=True):
+                            _render_ss_cards(_arch_df, card_class)
 
     # ─────────────────────────────────────────────────────────────────────────
     # SECTION 4: JOURNEY MAP
@@ -950,88 +928,36 @@ if st.session_state.df is not None:
 
     # ── Self-Serve Engagement Journey ───────────────────────────────────────
     with _jmap_ss:
-        # 4 buyer journey stages — derived from behavioural signals, not segment labels.
-        # Browser → Consideration → Purchase, plus Re-engagement for lapsed accounts.
-        _SS_STAGES = [
-            (
-                "ss_browser",
-                "Browser",
-                "#8E8E93",
-                "Low orders · no negotiation activity yet",
-                "video_call",
-                "Just getting started — placed orders but haven't engaged with offers or chat. "
-                "Average 1.3 orders, £194 GMV. A video call lets them see stock before committing "
-                "and builds the supplier relationship that drives repeat buying.",
-            ),
-            (
-                "ss_consideration",
-                "Consideration",
-                "#378ADD",
-                "Active on offers & chat · not yet converting",
-                "offer",
-                "Researching and negotiating (3.2 avg offers, 3.1 avg chat, 173 PDP views) "
-                "but only 1 order on average. Already comfortable with the platform — "
-                "an offer prompt helps close the deal they're already building toward.",
-            ),
-            (
-                "ss_purchase",
-                "Purchase",
-                "#1D9E75",
-                "Regular buyer · high engagement",
-                "bundle",
-                "Your strongest self-serve accounts — £2,266 avg GMV, 5 avg orders, very active. "
-                "Bundle ordering reduces fulfilment time and consolidates spend. "
-                "No outreach urgency; nudge toward efficiency.",
-            ),
-            (
-                "ss_reengagement",
-                "Re-engagement",
-                "#E67E22",
-                "High past spend · gone quiet",
-                "chat",
-                "Spent well before (£406 avg GMV) but now low engagement (6.9 avg) and barely ordering. "
-                "In-app chat is personal and low-effort — the right restart signal for lapsed accounts "
-                "who already know the platform.",
-            ),
+        _SS_JOURNEY_STAGES = [
+            ("SS_ACTIVE_BUYER",         "Active Buyer",             "#1D9E75", "bundle",
+             "Top-decile order frequency across multiple months. Retain and bundle."),
+            ("SS_HIGH_INTENT",          "High Intent, Not Conv.",   "#378ADD", "offer",
+             "Active chat and offers — purchase intent is clear. Help close."),
+            ("SS_HIGH_SPENDER_LOW_ENG", "High Spender, Low Eng.",   "#E67E22", "chat",
+             "High GMV but disengaged from platform features. Re-engage before they go quiet."),
+            ("SS_LOW_ENGAGEMENT",       "Low Engagement, Low Spend","#8E8E93", "video_call",
+             "Low intent and spend. Feature introduction needed to build purchase behaviour."),
         ]
 
-        _ss_all = df[df["segment"].isin(["TRUE_HEADROOM", "PASSIVE_BUYER", "SELF_SERVE_OTHER"])].copy()
-
-        # Compute buyer journey stage inline (mirrors plays.py logic)
-        def _buyer_stage(row):
-            gmv    = row.get("gmv_total_6m", 0)
-            eng    = row.get("engagement_score", 0)
-            offers = row.get("make_an_offer_6m", 0)
-            chat   = row.get("chat_threads", 0)
-            orders = row.get("orders_6m", 0)
-            if gmv > 200 and eng < 15 and orders <= 2:
-                return "ss_reengagement"
-            if orders >= 2 and eng >= 20:
-                return "ss_purchase"
-            if (offers > 0 or chat > 0) and orders <= 2:
-                return "ss_consideration"
-            return "ss_browser"
-
-        _ss_all["buyer_stage"] = _ss_all.apply(_buyer_stage, axis=1)
-
+        _ss_all = df[df["segment"] == "SELF_SERVE"].copy()
         _sscols = st.columns(4)
 
-        for _i, (_stage_key, _sname, _scol, _signal, _nudge_key, _rationale) in enumerate(_SS_STAGES):
-            _col_df = _ss_all[_ss_all["buyer_stage"] == _stage_key].sort_values(
+        for _i, (_arch_key, _sname, _scol, _nudge_key, _rationale) in enumerate(_SS_JOURNEY_STAGES):
+            _col_df = _ss_all[_ss_all.get("ss_archetype", pd.Series(dtype=str)) == _arch_key].sort_values(
                 "gmv_total_6m", ascending=False
-            )
+            ) if "ss_archetype" in _ss_all.columns else pd.DataFrame()
             _n       = len(_col_df)
-            _gmv     = _col_df["gmv_total_6m"].sum()
+            _gmv     = _col_df["gmv_total_6m"].sum() if _n > 0 else 0
             _avg_gmv = _col_df["gmv_total_6m"].mean() if _n > 0 else 0
-            _avg_eng = _col_df["engagement_score"].mean() if _n > 0 else 0
+            _avg_orders = _col_df["orders_6m"].mean() if _n > 0 else 0
 
             with _sscols[_i]:
                 st.markdown(f"**{_sname}**")
-                st.caption(f"{_signal}  \n**{_n}** accounts · £{_gmv:,.0f} total GMV")
+                st.caption(f"**{_n}** accounts · £{_gmv:,.0f} total GMV")
                 st.markdown(
                     f"<div style='display:flex;gap:16px;margin:4px 0 4px;font-size:11px'>"
                     f"<span>avg GMV <strong>£{_avg_gmv:,.0f}</strong></span>"
-                    f"<span>avg eng <strong>{_avg_eng:.0f}</strong></span>"
+                    f"<span>avg orders <strong>{_avg_orders:.1f}</strong></span>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -1059,8 +985,8 @@ if st.session_state.df is not None:
                 for _, _row in _col_df.iterrows():
                     _gmva  = _row.get("gmv_total_6m", 0)
                     _ord   = int(_row.get("orders_6m", 0))
-                    _eng   = _row.get("engagement_score", 0)
-                    _pdp   = int(_row.get("pdp_views_6m", 0))
+                    _chat  = int(_row.get("chat_threads", 0))
+                    _off   = int(_row.get("make_an_offer_6m", 0))
                     _nudge = NUDGE_LABELS.get(_row.get("nudge_feature", ""), "")
 
                     st.markdown(
@@ -1074,8 +1000,8 @@ if st.session_state.df is not None:
                         f"display:flex;gap:14px;flex-wrap:wrap'>"
                         f"<span>£{_gmva:,.0f} GMV</span>"
                         f"<span>{_ord} orders</span>"
-                        f"<span>{_pdp} PDP views</span>"
-                        f"<span>eng {_eng:.0f}</span>"
+                        f"<span>{_chat} chats</span>"
+                        f"<span>{_off} offers</span>"
                         f"</div>"
                         + (f"<div style='font-size:10px;font-weight:600;color:{_scol};"
                            f"margin-top:4px'>→ {_nudge}</div>" if _nudge else "")
@@ -1188,9 +1114,8 @@ if st.session_state.df is not None:
     _MESSAGING_STAGES = {"not_started", "stalled", "moving"}
     _active_broker = [p for p in JOURNEY_ORDER if p in _active_positions and p in _broker_stages and p in _MESSAGING_STAGES]
 
-    _ss_segs = ["TRUE_HEADROOM", "PASSIVE_BUYER", "SELF_SERVE_OTHER"]
     _active_nudges = set(
-        df[df["segment"].isin(_ss_segs)]["nudge_feature"].dropna().unique()
+        df[df["segment"] == "SELF_SERVE"]["nudge_feature"].dropna().unique()
     )
     _ss_pathways = _variants.get("ss_pathways", {})
     _active_ss = [p for p in _ss_pathways if p in _active_nudges]

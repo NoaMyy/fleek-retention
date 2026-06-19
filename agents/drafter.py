@@ -142,7 +142,7 @@ def draft_messages(
     if variants is None:
         variants = _load_variants()
 
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
         print("  [drafter] No ANTHROPIC_API_KEY — filling placeholder messages.")
         df = df.copy()
